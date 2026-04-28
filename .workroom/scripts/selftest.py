@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+
+import json
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import run_phases
+from agent_runner import ignore_read_only_copy_items, normalize_structured_output, parse_review_result
+from review_artifacts import decision_code, review_exit_code
+from run_phases import (
+    fix_prompt,
+    retryable_pause_exit_code,
+    summarize_phase_failure,
+    verification_feedback,
+)
+
+
+def review_payload(decision: str, issues: list[str] | None = None) -> str:
+    issues = issues or []
+    return json.dumps(
+        {
+            "decision": decision,
+            "summary": "review summary",
+            "blocking_issues": issues,
+            "missing_tests": [],
+            "architecture_violations": [],
+            "recommended_fixes": [],
+        }
+    )
+
+
+def test_review_contract() -> None:
+    approved = review_payload("APPROVED")
+    changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
+    invalid_changes = review_payload("CHANGES_REQUESTED")
+    invalid_approved = review_payload("APPROVED", ["still broken"])
+
+    assert parse_review_result(approved) is not None
+    assert parse_review_result(changes) is not None
+    assert parse_review_result(invalid_changes) is None
+    assert parse_review_result(invalid_approved) is None
+    assert decision_code(approved) == 0
+    assert decision_code(changes) == 2
+    assert review_exit_code(2, strict_exit_codes=False) == 0
+    assert review_exit_code(2, strict_exit_codes=True) == 2
+
+
+def test_claude_envelope_normalization() -> None:
+    changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
+    result_envelope = json.dumps({"type": "result", "result": changes})
+    structured_envelope = json.dumps({"type": "result", "structured_output": json.loads(changes)})
+
+    assert decision_code(normalize_structured_output(result_envelope)) == 2
+    assert decision_code(normalize_structured_output(structured_envelope)) == 2
+
+
+def test_read_only_copy_ignore() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "root"
+        out = Path(tmp) / "out"
+        root.mkdir()
+        (root / "keep.txt").write_text("keep", encoding="utf-8")
+        (root / "node_modules").mkdir()
+        (root / "node_modules" / "skip.txt").write_text("skip", encoding="utf-8")
+        (root / "phase.log").write_text("skip", encoding="utf-8")
+        (root / "link").symlink_to(root / "keep.txt")
+
+        shutil.copytree(root, out, ignore=ignore_read_only_copy_items, symlinks=False)
+
+        assert (out / "keep.txt").is_file()
+        assert not (out / "node_modules").exists()
+        assert not (out / "phase.log").exists()
+        assert not (out / "link").exists()
+
+
+def test_harness_feedback_contract() -> None:
+    verify_error = (
+        "app/api/youtube-comments/handler.ts(62,48): error TS2339: "
+        "Property error does not exist on type YouTubeUrlValidationResult."
+    )
+    feedback = verification_feedback(verify_error)
+
+    assert summarize_phase_failure(feedback) == verify_error
+    assert retryable_pause_exit_code(strict_exit_codes=False) == 0
+    assert retryable_pause_exit_code(strict_exit_codes=True) == 1
+    assert run_phases.MAX_RETRIES >= 5
+
+    prompt = fix_prompt(
+        run_phases.ROOT / ".workroom/phases/example/context.md",
+        "example",
+        run_phases.ROOT / ".workroom/templates/phase.template.md",
+        [],
+        feedback,
+        "## git diff --stat\nhandler.ts | 2 +-",
+    )
+    assert "Current Repository Change Snapshot" in prompt
+    assert "Fix Requirements" in prompt
+    assert "handler.ts" in prompt
+
+
+def main() -> int:
+    tests = [
+        test_review_contract,
+        test_claude_envelope_normalization,
+        test_read_only_copy_ignore,
+        test_harness_feedback_contract,
+    ]
+    for test in tests:
+        test()
+        print(f"OK    {test.__name__}")
+    print("Workroom Harness self-test passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

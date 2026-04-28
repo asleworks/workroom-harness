@@ -28,6 +28,7 @@ REQUIRED_FILES = [
     ".workroom/scripts/agent_runner.py",
     ".workroom/scripts/review_artifacts.py",
     ".workroom/scripts/validate_phases.py",
+    ".workroom/scripts/selftest.py",
     ".workroom/scripts/install-codex.sh",
     ".workroom/scripts/install-claude.sh",
     ".workroom/scripts/install.py",
@@ -84,6 +85,21 @@ def check_docs() -> bool:
         capture_output=True,
     )
     print(f"{'OK' if result.returncode == 0 else 'WARN'}  project docs validation")
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.stderr.strip():
+        print(result.stderr.strip(), file=sys.stderr)
+    return result.returncode == 0
+
+
+def check_selftest() -> bool:
+    result = subprocess.run(
+        [sys.executable, str(WORKROOM_DIR / "scripts/selftest.py")],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    print(f"{'OK' if result.returncode == 0 else 'FAIL'}  Workroom Harness self-test")
     if result.stdout.strip():
         print(result.stdout.strip())
     if result.stderr.strip():
@@ -151,19 +167,20 @@ def main() -> int:
     skills_ok = check_skills()
     json_ok = check_json_files()
     verify_ok = check_verify()
+    selftest_ok = check_selftest()
     docs_ok = check_docs()
     agent_ok = check_agents()
 
     print()
-    if files_ok and skills_ok and json_ok and verify_ok and docs_ok and agent_ok:
+    if files_ok and skills_ok and json_ok and verify_ok and selftest_ok and docs_ok and agent_ok:
         print("Workroom Harness is ready.")
         return 0
 
-    if files_ok and skills_ok and json_ok and verify_ok and docs_ok:
+    if files_ok and skills_ok and json_ok and verify_ok and selftest_ok and docs_ok:
         print("Workroom Harness docs and files are ready. Install Codex or Claude CLI to run phases automatically.")
         return 0
 
-    if files_ok and skills_ok and json_ok and verify_ok:
+    if files_ok and skills_ok and json_ok and verify_ok and selftest_ok:
         print("Workroom Harness is installed. Run workroom-plan before phase planning or harness execution.")
         return 0
 
