@@ -18,8 +18,8 @@ Required behavior:
 7. Write `index.json` and one `phase-XX.md` file per phase.
 8. Run `python3 .workroom/scripts/validate_phases.py {task-name}`.
 9. Run `python3 .workroom/scripts/review_artifacts.py phases {task-name} --agent codex`.
-10. If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the phase files using `blocking_issues`, `missing_tests`, `architecture_violations`, and `recommended_fixes`, then rerun the fresh review script.
-11. Continue until the review JSON contains `"decision": "APPROVED"`.
+10. If the review contains `REVIEW_DECISION: CHANGES_REQUESTED`, improve the phase files using the natural-language feedback, then rerun the fresh review script.
+11. Continue until the review contains `REVIEW_DECISION: APPROVED`.
 12. Run `python3 .workroom/scripts/validate_phases.py {task-name}` again after review changes.
 13. Do not implement product code.
 

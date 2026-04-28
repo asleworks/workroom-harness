@@ -12,7 +12,6 @@ from agent_runner import check_agent, is_agent_infrastructure_failure, parse_rev
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
-REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
 
 
 def stamp() -> str:
@@ -20,7 +19,7 @@ def stamp() -> str:
 
 
 def run_reviewer(agent: str, prompt: str, log_path: Path) -> tuple[int, str]:
-    return run_agent(agent, ROOT, prompt, log_path, read_only=True, output_schema=REVIEW_SCHEMA)
+    return run_agent(agent, ROOT, prompt, log_path, read_only=True)
 
 
 def docs_prompt() -> str:
@@ -43,9 +42,17 @@ Use `.workroom/workflows/review.md` in docs mode.
 
 ## Required Review Output
 
-Return only the structured JSON object required by `.workroom/schemas/review-result.schema.json`.
-Use `"decision": "APPROVED"` only if there are no blocking issues and the docs are ready for phase planning.
-Use `"decision": "CHANGES_REQUESTED"` if the planning agent must change anything before phase planning.
+Write a natural-language review. Include the concrete issues and fixes when changes are needed.
+End with exactly one decision line:
+
+`REVIEW_DECISION: APPROVED`
+
+or
+
+`REVIEW_DECISION: CHANGES_REQUESTED`
+
+Use `APPROVED` only if there are no blocking issues and the docs are ready for phase planning.
+Use `CHANGES_REQUESTED` if the planning agent must change anything before phase planning.
 """
 
 
@@ -74,9 +81,17 @@ Use `.workroom/workflows/review.md` in phases mode.
 
 ## Required Review Output
 
-Return only the structured JSON object required by `.workroom/schemas/review-result.schema.json`.
-Use `"decision": "APPROVED"` only if there are no blocking issues and the phase plan is executable by fresh worker agents.
-Use `"decision": "CHANGES_REQUESTED"` if the planning agent must change any phase file or phase index before harness execution.
+Write a natural-language review. Include the concrete issues and fixes when changes are needed.
+End with exactly one decision line:
+
+`REVIEW_DECISION: APPROVED`
+
+or
+
+`REVIEW_DECISION: CHANGES_REQUESTED`
+
+Use `APPROVED` only if there are no blocking issues and the phase plan is executable by fresh worker agents.
+Use `CHANGES_REQUESTED` if the planning agent must change any phase file or phase index before harness execution.
 """
 
 
@@ -163,7 +178,7 @@ def main() -> int:
     decision = decision_code(output)
     exit_code = review_exit_code(decision, args.strict_exit_codes)
     if exit_code == 1:
-        print('ERROR: Review output must contain a valid structured JSON decision.', file=sys.stderr)
+        print("ERROR: Review output must include REVIEW_DECISION: APPROVED or REVIEW_DECISION: CHANGES_REQUESTED.", file=sys.stderr)
     return exit_code
 
 

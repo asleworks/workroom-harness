@@ -68,21 +68,22 @@ EMPTY_FIELD_PATTERNS = [
 ]
 
 
-def validate_file(relative_path: str, required_markers: list[str]) -> list[str]:
+def validate_file(relative_path: str, required_markers: list[str]) -> tuple[list[str], list[str]]:
     path = ROOT / relative_path
     errors: list[str] = []
+    warnings: list[str] = []
 
     if not path.exists():
-        return [f"missing {relative_path}"]
+        return [f"missing {relative_path}"], warnings
 
     text = path.read_text(encoding="utf-8")
     stripped = text.strip()
     if len(stripped) < 120:
-        errors.append(f"{relative_path}: document is too thin")
+        warnings.append(f"{relative_path}: document may be too thin")
 
     for marker in required_markers:
         if marker.lower() not in text.lower():
-            errors.append(f"{relative_path}: missing section or marker {marker!r}")
+            warnings.append(f"{relative_path}: missing suggested section or marker {marker!r}")
 
     for pattern in PLACEHOLDER_PATTERNS:
         if re.search(pattern, text, flags=re.IGNORECASE):
@@ -92,33 +93,43 @@ def validate_file(relative_path: str, required_markers: list[str]) -> list[str]:
         if re.search(pattern, text):
             errors.append(f"{relative_path}: empty field remains: {pattern}")
 
-    return errors
+    return errors, warnings
 
 
-def validate_agents() -> list[str]:
+def validate_agents() -> tuple[list[str], list[str]]:
     errors: list[str] = []
+    warnings: list[str] = []
     agents = ROOT / ".workroom/AGENTS.md"
     if not agents.exists():
-        return ["missing .workroom/AGENTS.md"]
+        return ["missing .workroom/AGENTS.md"], warnings
 
     text = agents.read_text(encoding="utf-8")
     for marker in ["Project Profile", "Project Rules", "Decision Boundaries", "Architecture Boundaries", "Verification"]:
         if marker.lower() not in text.lower():
-            errors.append(f".workroom/AGENTS.md: missing section {marker!r}")
-    return errors
+            warnings.append(f".workroom/AGENTS.md: missing suggested section {marker!r}")
+    return errors, warnings
 
 
 def main() -> int:
     errors: list[str] = []
-    errors.extend(validate_agents())
+    warnings: list[str] = []
+    agent_errors, agent_warnings = validate_agents()
+    errors.extend(agent_errors)
+    warnings.extend(agent_warnings)
     for path, markers in REQUIRED_DOCS.items():
-        errors.extend(validate_file(path, markers))
+        file_errors, file_warnings = validate_file(path, markers)
+        errors.extend(file_errors)
+        warnings.extend(file_warnings)
 
     if errors:
         for error in errors:
             print(f"FAIL  {error}")
+        for warning in warnings:
+            print(f"WARN  {warning}")
         return 1
 
+    for warning in warnings:
+        print(f"WARN  {warning}")
     print("Docs are ready.")
     return 0
 

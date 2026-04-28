@@ -81,39 +81,34 @@ Treat `deferred_requirements` as acceptable when they are post-implementation ac
 
 ## Output Format
 
-Return only a JSON object matching `.workroom/schemas/review-result.schema.json`.
+Write a natural-language review. Do not edit files during review.
 
-Approved example:
+Include:
 
-```json
-{
-  "decision": "APPROVED",
-  "summary": "The reviewed artifact satisfies the relevant criteria.",
-  "blocking_issues": [],
-  "missing_tests": [],
-  "architecture_violations": [],
-  "recommended_fixes": []
-}
+- what you inspected
+- blocking issues, if any
+- missing verification, if any
+- architecture or scope concerns, if any
+- concrete fixes the worker or planner should make
+- non-blocking risks, if useful
+
+End with exactly one decision line:
+
+```text
+REVIEW_DECISION: APPROVED
 ```
 
-Changes requested example:
+or
 
-```json
-{
-  "decision": "CHANGES_REQUESTED",
-  "summary": "The reviewed artifact needs changes before approval.",
-  "blocking_issues": ["Describe each blocking issue concretely."],
-  "missing_tests": ["Describe each required missing verification."],
-  "architecture_violations": ["Describe each architecture rule violation."],
-  "recommended_fixes": ["Describe the smallest reasonable fixes."]
-}
+```text
+REVIEW_DECISION: CHANGES_REQUESTED
 ```
 
 ## Decision Rules
 
-- Use `"decision": "APPROVED"` only when the reviewed artifact satisfies the relevant mode criteria.
-- Use `"decision": "CHANGES_REQUESTED"` when docs, phase files, code, tests, or behavior must change before approval.
-- When using `"decision": "CHANGES_REQUESTED"`, include at least one concrete item in `blocking_issues`, `missing_tests`, `architecture_violations`, or `recommended_fixes`.
-- When using `"decision": "APPROVED"`, leave `blocking_issues`, `missing_tests`, `architecture_violations`, and `recommended_fixes` empty.
+- Use `REVIEW_DECISION: APPROVED` only when the reviewed artifact satisfies the relevant mode criteria.
+- Use `REVIEW_DECISION: CHANGES_REQUESTED` when docs, phase files, code, tests, or behavior must change before approval.
+- When requesting changes, explain the concrete fixes in natural language.
+- When approving, still mention any non-blocking risks or deferred requirements that future agents should know.
 - Keep review findings concrete enough for a worker agent to fix without asking for interpretation.
 - Do not edit files during review. Review is read-only.

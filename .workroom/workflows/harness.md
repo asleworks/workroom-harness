@@ -82,7 +82,7 @@ A phase is complete only when all are true:
 
 - worker implementation finished
 - `.workroom/scripts/verify.sh` passed
-- reviewer returned structured JSON with `"decision": "APPROVED"`
+- reviewer returned `REVIEW_DECISION: APPROVED`
 - harness updated the phase with `status`, `completed_at`, and `summary`
 
 ## Failure Handling

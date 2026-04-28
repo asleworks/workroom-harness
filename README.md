@@ -94,4 +94,6 @@ If verification or review fails, the harness feeds the failure back to the worke
 
 Routine compiler, lint, test, and review failures are fed back to the worker internally. By default the harness prints concise retry progress and log paths instead of dumping the full failure output on every attempt. Use `--verbose` when you need full per-attempt output in the terminal.
 
+Review agents write natural-language findings and end with `REVIEW_DECISION: APPROVED` or `REVIEW_DECISION: CHANGES_REQUESTED`. The harness parses only that decision line and passes the review text through as feedback.
+
 Post-implementation actions such as filling API keys, connecting accounts, or running manual external checks should be recorded as `deferred_requirements`. The harness can finish as `completed_with_deferred_requirements` and print those actions at the end instead of blocking midway.

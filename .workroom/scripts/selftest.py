@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent_runner
 import run_phases
-from agent_runner import ignore_read_only_copy_items, normalize_structured_output, parse_review_result
+from agent_runner import ignore_read_only_copy_items, parse_review_result
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
     collect_deferred_requirements,
@@ -32,42 +32,35 @@ from run_phases import (
 
 
 def review_payload(decision: str, issues: list[str] | None = None) -> str:
-    issues = issues or []
-    return json.dumps(
-        {
-            "decision": decision,
-            "summary": "review summary",
-            "blocking_issues": issues,
-            "missing_tests": [],
-            "architecture_violations": [],
-            "recommended_fixes": [],
-        }
-    )
+    body = "Reviewed files and checked acceptance criteria."
+    if issues:
+        body += "\n\nBlocking issues:\n" + "\n".join(f"- {item}" for item in issues)
+    return f"{body}\n\nREVIEW_DECISION: {decision}"
 
 
 def test_review_contract() -> None:
     approved = review_payload("APPROVED")
     changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
-    invalid_changes = review_payload("CHANGES_REQUESTED")
-    invalid_approved = review_payload("APPROVED", ["still broken"])
+    invalid = "Reviewed the work but forgot the machine-readable decision line."
+    legacy_json = json.dumps({"decision": "CHANGES_REQUESTED", "summary": "fix issue"})
 
     assert parse_review_result(approved) is not None
     assert parse_review_result(changes) is not None
-    assert parse_review_result(invalid_changes) is None
-    assert parse_review_result(invalid_approved) is None
+    assert parse_review_result(invalid) is None
+    assert parse_review_result(legacy_json) is not None
     assert decision_code(approved) == 0
     assert decision_code(changes) == 2
     assert review_exit_code(2, strict_exit_codes=False) == 0
     assert review_exit_code(2, strict_exit_codes=True) == 2
 
 
-def test_claude_envelope_normalization() -> None:
+def test_agent_envelope_review_parsing() -> None:
     changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
     result_envelope = json.dumps({"type": "result", "result": changes})
-    structured_envelope = json.dumps({"type": "result", "structured_output": json.loads(changes)})
+    structured_envelope = json.dumps({"type": "result", "structured_output": {"decision": "APPROVED"}})
 
-    assert decision_code(normalize_structured_output(result_envelope)) == 2
-    assert decision_code(normalize_structured_output(structured_envelope)) == 2
+    assert decision_code(result_envelope) == 2
+    assert decision_code(structured_envelope) == 0
 
 
 def test_read_only_copy_ignore() -> None:
@@ -216,7 +209,7 @@ def test_untracked_file_changes_count_as_progress() -> None:
 def main() -> int:
     tests = [
         test_review_contract,
-        test_claude_envelope_normalization,
+        test_agent_envelope_review_parsing,
         test_read_only_copy_ignore,
         test_harness_feedback_contract,
         test_phase_prompt_status_contract,

@@ -17,7 +17,6 @@ from validate_phases import validate_task, validate_top_index
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
-REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
 RUNNABLE_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying"}
 STOP_PHASE_STATUSES = {"blocked", "error"}
 DEFERABLE_BLOCKED_NEEDLES = (
@@ -53,6 +52,7 @@ def int_env(name: str, default: int) -> int:
 
 MAX_ATTEMPTS = int_env("WORKROOM_PHASE_MAX_ATTEMPTS", int_env("WORKROOM_PHASE_MAX_RETRIES", 50))
 STALL_LIMIT = int_env("WORKROOM_PHASE_STALL_LIMIT", 5)
+REVIEW_DECISION_ATTEMPTS = int_env("WORKROOM_REVIEW_DECISION_ATTEMPTS", 3)
 
 
 def stamp() -> str:
@@ -113,9 +113,8 @@ def run_agent(
     prompt: str,
     log_path: Path,
     read_only: bool = False,
-    output_schema: Path | None = None,
 ) -> tuple[int, str]:
-    return run_agent_process(agent, ROOT, prompt, log_path, read_only=read_only, output_schema=output_schema)
+    return run_agent_process(agent, ROOT, prompt, log_path, read_only=read_only)
 
 
 def summarize_runner_error(output: str) -> str:
@@ -477,23 +476,10 @@ def progress_signature(feedback: str) -> str:
 
 
 def review_feedback(result: dict) -> str:
-    lines = [
-        "Review requested changes.",
-        "",
-        f"Summary: {result.get('summary', '').strip()}",
-    ]
-    for key, title in [
-        ("blocking_issues", "Blocking Issues"),
-        ("missing_tests", "Missing Tests"),
-        ("architecture_violations", "Architecture Violations"),
-        ("recommended_fixes", "Recommended Fixes"),
-    ]:
-        items = [str(item).strip() for item in result.get(key, []) if str(item).strip()]
-        if items:
-            lines.append("")
-            lines.append(f"{title}:")
-            lines.extend(f"- {item}" for item in items)
-    return "\n".join(lines).strip()
+    feedback = str(result.get("feedback", "")).strip()
+    if not feedback:
+        feedback = "The review agent requested changes but did not provide details."
+    return "Review requested changes.\n\n" + feedback
 
 
 def log_ref(path: Path) -> str:
@@ -557,16 +543,12 @@ After implementation, update `.workroom/phases/{task_name}/index.json` for this 
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
-Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Implement the phase, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
+Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Implement the phase, report any checks you could not run in your final response, and let the harness run verification and review.
 If an API key, secret, account connection, deployment setting, or manual check is required only after implementation, add it to this phase's `"deferred_requirements"` list in `.workroom/phases/{task_name}/index.json` instead of blocking.
 
-Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
+Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval.
 
-End your final response with one concise line:
-
-```text
-PHASE_SUMMARY: what changed and what the next phase should know
-```
+End with a brief natural-language summary of what changed and what the next phase should know.
 
 ## Phase
 
@@ -630,16 +612,12 @@ After fixing, update `.workroom/phases/{task_name}/index.json` for this phase on
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
-Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Fix what you can from the concrete feedback, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
+Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Fix what you can from the concrete feedback, report any checks you could not run in your final response, and let the harness run verification and review.
 If an API key, secret, account connection, deployment setting, or manual check is required only after implementation, add it to this phase's `"deferred_requirements"` list in `.workroom/phases/{task_name}/index.json` instead of blocking.
 
-Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
+Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval.
 
-End your final response with one concise line:
-
-```text
-PHASE_SUMMARY: what changed and what the next phase should know
-```
+End with a brief natural-language summary of what changed and what the next phase should know.
 """
 
 
@@ -689,10 +667,18 @@ Harness-owned phase index fields are not worker deliverables. Do not request cha
 
 Follow `.workroom/workflows/review.md`.
 
-Return only the structured JSON object required by `.workroom/schemas/review-result.schema.json`.
+Write a natural-language review. If changes are needed, explain the concrete fix targets clearly enough for the worker to act without interpretation.
 
-Use `"decision": "APPROVED"` only if there are no blocking issues and the phase satisfies its acceptance criteria.
-Use `"decision": "CHANGES_REQUESTED"` if the worker must change anything before the next phase.
+End with exactly one decision line:
+
+`REVIEW_DECISION: APPROVED`
+
+or
+
+`REVIEW_DECISION: CHANGES_REQUESTED`
+
+Use `APPROVED` only if there are no blocking issues and the phase satisfies its acceptance criteria.
+Use `CHANGES_REQUESTED` if the worker must change anything before the next phase.
 """
 
 
@@ -876,28 +862,51 @@ def main() -> int:
                 verify_log_path = task_dir / f"{phase['id']}.verify.log"
                 verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], verify_log_path)
                 if verify_code == 0:
+                    review_result = None
+                    review_code = 1
+                    review_output = ""
                     review_log_path = task_dir / f"{phase['id']}.review.{retries + 1}.log"
-                    set_phase_status(
-                        index_path,
-                        phase["id"],
-                        "reviewing",
-                        attempt=retries + 1,
-                        log=str(review_log_path.relative_to(ROOT)),
+                    base_review_prompt = review_prompt(
+                        context_path,
+                        task_name,
+                        phase_file,
+                        verify_output,
+                        previous_summaries,
+                        current_change_snapshot(),
                     )
-                    review_code, review_output = run_agent(
-                        agent,
-                        review_prompt(
-                            context_path,
-                            task_name,
-                            phase_file,
-                            verify_output,
-                            previous_summaries,
-                            current_change_snapshot(),
-                        ),
-                        review_log_path,
-                        read_only=True,
-                        output_schema=REVIEW_SCHEMA,
-                    )
+                    for review_attempt in range(1, REVIEW_DECISION_ATTEMPTS + 1):
+                        review_log_path = task_dir / (
+                            f"{phase['id']}.review.{retries + 1}.log"
+                            if review_attempt == 1
+                            else f"{phase['id']}.review.{retries + 1}.{review_attempt}.log"
+                        )
+                        set_phase_status(
+                            index_path,
+                            phase["id"],
+                            "reviewing",
+                            attempt=retries + 1,
+                            review_attempt=review_attempt,
+                            log=str(review_log_path.relative_to(ROOT)),
+                        )
+                        active_review_prompt = base_review_prompt
+                        if review_attempt > 1:
+                            active_review_prompt += (
+                                "\n\nYour previous review output did not include a parseable decision line. "
+                                "Review again and end with exactly one line: "
+                                "REVIEW_DECISION: APPROVED or REVIEW_DECISION: CHANGES_REQUESTED.\n"
+                            )
+                        review_code, review_output = run_agent(
+                            agent,
+                            active_review_prompt,
+                            review_log_path,
+                            read_only=True,
+                        )
+                        if review_code != 0:
+                            break
+                        review_result = parse_review_result(review_output)
+                        if review_result is not None:
+                            break
+                        report_retry_feedback("Review decision line missing.", review_output, review_log_path, args.verbose)
                     if review_code != 0:
                         if is_agent_infrastructure_failure(agent, review_output):
                             return abort_agent_infrastructure_failure(agent, review_output, review_log_path, index_path, phase["id"])
@@ -907,14 +916,15 @@ def main() -> int:
                     else:
                         review_result = parse_review_result(review_output)
                         if review_result is None:
-                            return abort_agent_infrastructure_failure(
-                                agent,
-                                "ERROR: Review agent returned invalid structured JSON.\n\n" + review_output,
-                                review_log_path,
-                                index_path,
-                                phase["id"],
+                            feedback = (
+                                "Review agent output did not include a valid decision line. "
+                                "The review must end with REVIEW_DECISION: APPROVED or REVIEW_DECISION: CHANGES_REQUESTED.\n\n"
+                                "Last review output:\n\n"
+                                + review_output
                             )
-                        if review_result["decision"] == "APPROVED":
+                            feedback_log_path = review_log_path
+                            report_retry_feedback("Review decision line missing.", feedback, feedback_log_path, args.verbose)
+                        elif review_result["decision"] == "APPROVED":
                             print(f"Review approved {phase['id']}")
                             index = read_json(index_path)
                             for item in index["phases"]:
@@ -939,10 +949,10 @@ def main() -> int:
                                     break
                             write_json(index_path, index)
                             break
-
-                        feedback = review_feedback(review_result)
-                        feedback_log_path = review_log_path
-                        report_retry_feedback("Review requested changes.", feedback, feedback_log_path, args.verbose)
+                        else:
+                            feedback = review_feedback(review_result)
+                            feedback_log_path = review_log_path
+                            report_retry_feedback("Review requested changes.", feedback, feedback_log_path, args.verbose)
                 else:
                     feedback = verification_feedback(verify_output)
                     feedback_log_path = verify_log_path

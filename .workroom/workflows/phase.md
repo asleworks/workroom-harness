@@ -87,7 +87,7 @@ Run a fresh read-only review agent:
 python3 .workroom/scripts/review_artifacts.py phases {task-name} --agent auto
 ```
 
-The review agent uses `.workroom/workflows/review.md` in `phases` mode and returns structured JSON validated by `.workroom/schemas/review-result.schema.json`.
+The review agent uses `.workroom/workflows/review.md` in `phases` mode. It writes a natural-language review and ends with a `REVIEW_DECISION:` line.
 
 Check:
 
@@ -104,11 +104,11 @@ Check:
 - no phase contains vague manual judgment as its only completion condition
 - no placeholder text remains
 
-The review script exits `0` for any valid review decision. Inspect the JSON decision, not only the shell exit code.
+The review script exits `0` for any valid review decision. Inspect the `REVIEW_DECISION:` line, not only the shell exit code.
 
-If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the phase files using the concrete review fields and run the review agent again.
+If the review contains `REVIEW_DECISION: CHANGES_REQUESTED`, improve the phase files using the concrete natural-language feedback and run the review agent again.
 
-Do not continue to harness execution until the fresh review JSON contains `"decision": "APPROVED"`.
+Do not continue to harness execution until the fresh review contains `REVIEW_DECISION: APPROVED`.
 
 After the fresh phase-plan review agent approves, run validation again:
 

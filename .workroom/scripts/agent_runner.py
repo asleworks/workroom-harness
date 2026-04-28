@@ -3,6 +3,7 @@
 import codecs
 import json
 import os
+import re
 import select
 import shutil
 import signal
@@ -45,20 +46,7 @@ def int_env(name: str, default: int) -> int:
 AGENT_IDLE_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", 0)
 AGENT_TOTAL_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", 7200)
 CLAUDE_PERMISSION_MODE = os.environ.get("WORKROOM_CLAUDE_PERMISSION_MODE", "bypassPermissions").strip()
-REVIEW_RESULT_KEYS = {
-    "decision",
-    "summary",
-    "blocking_issues",
-    "missing_tests",
-    "architecture_violations",
-    "recommended_fixes",
-}
-REVIEW_RESULT_ARRAY_KEYS = {
-    "blocking_issues",
-    "missing_tests",
-    "architecture_violations",
-    "recommended_fixes",
-}
+REVIEW_DECISION_PATTERN = re.compile(r"(?im)^\s*REVIEW_DECISION\s*:\s*(APPROVED|CHANGES_REQUESTED)\s*$")
 
 
 def resolve_agent(agent: str) -> str:
@@ -91,38 +79,7 @@ def ignore_read_only_copy_items(directory: str, names: list[str]) -> set[str]:
     return ignored
 
 
-def parse_review_result(output: str) -> dict | None:
-    try:
-        data = json.loads(output)
-    except Exception:
-        return None
-
-    if not isinstance(data, dict):
-        return None
-    if set(data.keys()) != REVIEW_RESULT_KEYS:
-        return None
-    if data.get("decision") not in {"APPROVED", "CHANGES_REQUESTED"}:
-        return None
-    if not isinstance(data.get("summary"), str):
-        return None
-    for key in REVIEW_RESULT_ARRAY_KEYS:
-        value = data.get(key)
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            return None
-    actionable_items = [
-        item.strip()
-        for key in REVIEW_RESULT_ARRAY_KEYS
-        for item in data[key]
-        if item.strip()
-    ]
-    if data["decision"] == "CHANGES_REQUESTED" and not actionable_items:
-        return None
-    if data["decision"] == "APPROVED" and actionable_items:
-        return None
-    return data
-
-
-def normalize_structured_output(output: str) -> str:
+def review_text_from_output(output: str) -> str:
     try:
         envelope = json.loads(output)
     except Exception:
@@ -131,19 +88,47 @@ def normalize_structured_output(output: str) -> str:
     if not isinstance(envelope, dict):
         return output
 
-    structured_output = envelope.get("structured_output")
-    if isinstance(structured_output, dict):
-        return json.dumps(structured_output, ensure_ascii=False)
-
     result = envelope.get("result")
     if isinstance(result, str) and result.strip():
-        try:
-            json.loads(result)
-            return result
-        except Exception:
-            return output
+        return result
+
+    structured_output = envelope.get("structured_output")
+    if isinstance(structured_output, dict):
+        return json.dumps(structured_output, indent=2, ensure_ascii=False)
 
     return output
+
+
+def legacy_json_review_text(data: dict) -> str:
+    decision = data.get("decision")
+    if decision not in {"APPROVED", "CHANGES_REQUESTED"}:
+        return ""
+
+    body = json.dumps(data, indent=2, ensure_ascii=False)
+    return f"{body}\n\nREVIEW_DECISION: {decision}"
+
+
+def parse_review_result(output: str) -> dict | None:
+    text = review_text_from_output(output).strip()
+
+    try:
+        data = json.loads(text)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        legacy_text = legacy_json_review_text(data)
+        if legacy_text:
+            text = legacy_text
+
+    matches = list(REVIEW_DECISION_PATTERN.finditer(text))
+    if not matches:
+        return None
+
+    decision = matches[-1].group(1)
+    return {
+        "decision": decision,
+        "feedback": text,
+    }
 
 
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -252,7 +237,6 @@ def run_codex_agent(
     prompt: str,
     log_path: Path,
     read_only: bool = False,
-    output_schema: Path | None = None,
 ) -> tuple[int, str]:
     final_message_path = log_path.with_suffix(log_path.suffix + ".final")
     command = [
@@ -268,8 +252,6 @@ def run_codex_agent(
         "--output-last-message",
         str(final_message_path),
     ]
-    if output_schema is not None:
-        command.extend(["--output-schema", str(output_schema)])
     command.append("-")
     code, transcript = run_streaming(
         command,
@@ -289,18 +271,10 @@ def run_claude_agent(
     prompt: str,
     log_path: Path,
     read_only: bool = False,
-    output_schema: Path | None = None,
 ) -> tuple[int, str]:
     command = ["claude", "-p"]
     if CLAUDE_PERMISSION_MODE:
         command.extend(["--permission-mode", CLAUDE_PERMISSION_MODE])
-    if output_schema is not None:
-        command.extend([
-            "--output-format",
-            "json",
-            "--json-schema",
-            output_schema.read_text(encoding="utf-8"),
-        ])
     if read_only:
         with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
             review_root = Path(tmp_dir) / root.name
@@ -309,8 +283,6 @@ def run_claude_agent(
     else:
         code, output = run_streaming(command, log_path, input_text=prompt, cwd=root)
 
-    if output_schema is not None and code == 0:
-        return code, normalize_structured_output(output)
     return code, output
 
 
@@ -320,12 +292,11 @@ def run_agent(
     prompt: str,
     log_path: Path,
     read_only: bool = False,
-    output_schema: Path | None = None,
 ) -> tuple[int, str]:
     if agent == "codex":
-        return run_codex_agent(root, prompt, log_path, read_only=read_only, output_schema=output_schema)
+        return run_codex_agent(root, prompt, log_path, read_only=read_only)
     if agent == "claude":
-        return run_claude_agent(root, prompt, log_path, read_only=read_only, output_schema=output_schema)
+        return run_claude_agent(root, prompt, log_path, read_only=read_only)
     return 1, f"Unsupported agent: {agent}"
 
 

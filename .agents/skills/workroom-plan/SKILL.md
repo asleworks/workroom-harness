@@ -15,8 +15,8 @@ Required behavior:
 4. Interview the user using the intake rules in `.workroom/workflows/plan.md`.
 5. Fill or improve `.workroom/AGENTS.md` and `.workroom/docs/`.
 6. Run `python3 .workroom/scripts/review_artifacts.py docs --agent codex`.
-7. If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the docs using `blocking_issues`, `missing_tests`, `architecture_violations`, and `recommended_fixes`, then rerun the fresh review script.
-8. Continue until the review JSON contains `"decision": "APPROVED"`.
+7. If the review contains `REVIEW_DECISION: CHANGES_REQUESTED`, improve the docs using the natural-language feedback, then rerun the fresh review script.
+8. Continue until the review contains `REVIEW_DECISION: APPROVED`.
 9. Run `python3 .workroom/scripts/validate_docs.py`.
 10. Do not create phase files.
 11. Do not implement product code.

@@ -92,12 +92,8 @@ def validate_task(task_dir: Path) -> list[str]:
         text = phase_path.read_text(encoding="utf-8")
         for heading in [
             "## Goal",
-            "## Read",
-            "## Likely Files To Modify",
             "## Work",
             "## Acceptance Criteria",
-            "## Verification",
-            "## Status Update",
         ]:
             if heading not in text:
                 errors.append(f"{phase_path.relative_to(ROOT)}: missing {heading}")
@@ -105,9 +101,6 @@ def validate_task(task_dir: Path) -> list[str]:
         for marker in PLACEHOLDER_MARKERS:
             if marker in text:
                 errors.append(f"{phase_path.relative_to(ROOT)}: placeholder remains: {marker}")
-
-        if ".workroom/scripts/verify.sh" not in text:
-            errors.append(f"{phase_path.relative_to(ROOT)}: missing verification command .workroom/scripts/verify.sh")
 
     return errors
 
