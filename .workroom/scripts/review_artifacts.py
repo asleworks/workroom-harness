@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 
 import argparse
-import json
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_runner import check_agent, is_agent_infrastructure_failure, resolve_agent, run_codex_agent
+from agent_runner import check_agent, is_agent_infrastructure_failure, parse_review_result, resolve_agent, run_agent
 
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
-APPROVED = "REVIEW_DECISION: APPROVED"
-CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
-DECISION_RE = re.compile(r"(?m)^\s*REVIEW_DECISION:\s*(APPROVED|CHANGES_REQUESTED)\s*$")
 REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
 
 
@@ -25,10 +20,7 @@ def stamp() -> str:
 
 
 def run_reviewer(agent: str, prompt: str, log_path: Path) -> tuple[int, str]:
-    if agent == "codex":
-        return run_codex_agent(ROOT, prompt, log_path, read_only=True, output_schema=REVIEW_SCHEMA)
-
-    return 1, f"Unsupported agent: {agent}"
+    return run_agent(agent, ROOT, prompt, log_path, read_only=True, output_schema=REVIEW_SCHEMA)
 
 
 def docs_prompt() -> str:
@@ -88,26 +80,13 @@ Use `"decision": "CHANGES_REQUESTED"` if the planning agent must change any phas
 """
 
 
-def extract_decision(output: str) -> str | None:
-    try:
-        data = json.loads(output)
-        decision = data.get("decision")
-        if decision in {"APPROVED", "CHANGES_REQUESTED"}:
-            return decision
-    except Exception:
-        pass
-
-    matches = DECISION_RE.findall(output)
-    if matches:
-        return matches[-1]
-    return None
-
-
 def decision_code(output: str) -> int:
-    decision = extract_decision(output)
-    if decision == "APPROVED":
+    result = parse_review_result(output)
+    if result is None:
+        return 1
+    if result["decision"] == "APPROVED":
         return 0
-    if decision == "CHANGES_REQUESTED":
+    if result["decision"] == "CHANGES_REQUESTED":
         return 2
     return 1
 
@@ -118,9 +97,9 @@ def main() -> int:
     parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases for phases mode")
     parser.add_argument(
         "--agent",
-        choices=["auto", "codex"],
+        choices=["auto", "codex", "claude"],
         default="auto",
-        help="Reviewer agent to use. auto selects Codex when available.",
+        help="Reviewer agent to use. auto prefers Codex, then Claude.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the reviewer prompt without calling an agent")
     args = parser.parse_args()
@@ -150,7 +129,7 @@ def main() -> int:
 
     agent = resolve_agent(args.agent)
     if not check_agent(agent):
-        print("ERROR: No supported reviewer CLI found. Install Codex, or use --dry-run.")
+        print("ERROR: No supported reviewer CLI found. Install Codex or Claude, or use --dry-run.")
         return 1
 
     log_path = WORKROOM_DIR / "reviews" / log_name

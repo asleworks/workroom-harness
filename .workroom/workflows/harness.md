@@ -36,10 +36,17 @@ In Codex, `$workroom-harness` should run:
 python3 .workroom/scripts/run_phases.py --agent codex
 ```
 
+In Claude Code, `/workroom-harness` should run:
+
+```bash
+python3 .workroom/scripts/run_phases.py --agent claude
+```
+
 When there is exactly one planned or running task in `.workroom/phases/index.json`, the script selects it automatically. When there are multiple runnable tasks, choose the task explicitly:
 
 ```bash
 python3 .workroom/scripts/run_phases.py {task-name} --agent codex
+python3 .workroom/scripts/run_phases.py {task-name} --agent claude
 ```
 
 The script is the harness engine. It is responsible for:
@@ -53,7 +60,7 @@ The script is the harness engine. It is responsible for:
 - updating phase status in `.workroom/phases/{task-name}/index.json`
 - preserving each completed phase summary for the next worker and reviewer
 
-Codex uses `codex exec`.
+Codex uses `codex exec`. Claude Code uses `claude -p`.
 
 Runner safeguards:
 
@@ -68,7 +75,7 @@ A phase is complete only when all are true:
 
 - worker implementation finished
 - `.workroom/scripts/verify.sh` passed
-- reviewer returned `REVIEW_DECISION: APPROVED`
+- reviewer returned structured JSON with `"decision": "APPROVED"`
 - phase status was updated to `completed`
 
 ## Failure Handling

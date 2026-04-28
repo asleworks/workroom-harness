@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import codecs
+import json
 import os
 import select
 import shutil
@@ -14,6 +15,19 @@ from pathlib import Path
 CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
 AGENT_IDLE_TIMEOUT_ERROR = "agent runner produced no output"
 AGENT_TOTAL_TIMEOUT_ERROR = "agent runner exceeded total timeout"
+READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
+    ".DS_Store",
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "coverage",
+    "dist",
+    "node_modules",
+    "*.log",
+    "*.log.final",
+)
 
 
 def int_env(name: str, default: int) -> int:
@@ -28,6 +42,20 @@ def int_env(name: str, default: int) -> int:
 
 AGENT_IDLE_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", 0)
 AGENT_TOTAL_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", 7200)
+REVIEW_RESULT_KEYS = {
+    "decision",
+    "summary",
+    "blocking_issues",
+    "missing_tests",
+    "architecture_violations",
+    "recommended_fixes",
+}
+REVIEW_RESULT_ARRAY_KEYS = {
+    "blocking_issues",
+    "missing_tests",
+    "architecture_violations",
+    "recommended_fixes",
+}
 
 
 def resolve_agent(agent: str) -> str:
@@ -35,13 +63,38 @@ def resolve_agent(agent: str) -> str:
         return agent
     if shutil.which("codex"):
         return "codex"
+    if shutil.which("claude"):
+        return "claude"
     return "none"
 
 
 def check_agent(agent: str) -> bool:
     if agent == "codex":
         return shutil.which("codex") is not None
+    if agent == "claude":
+        return shutil.which("claude") is not None
     return False
+
+
+def parse_review_result(output: str) -> dict | None:
+    try:
+        data = json.loads(output)
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if set(data.keys()) != REVIEW_RESULT_KEYS:
+        return None
+    if data.get("decision") not in {"APPROVED", "CHANGES_REQUESTED"}:
+        return None
+    if not isinstance(data.get("summary"), str):
+        return None
+    for key in REVIEW_RESULT_ARRAY_KEYS:
+        value = data.get(key)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            return None
+    return data
 
 
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -180,6 +233,54 @@ def run_codex_agent(
         if final_message.strip():
             return code, final_message
     return code, transcript
+
+
+def with_json_schema_prompt(prompt: str, output_schema: Path | None) -> str:
+    if output_schema is None:
+        return prompt
+    schema = output_schema.read_text(encoding="utf-8")
+    return f"""{prompt}
+
+## Structured Output Contract
+
+Return only a JSON object that validates against this JSON Schema. Do not wrap it in Markdown.
+
+```json
+{schema}
+```
+"""
+
+
+def run_claude_agent(
+    root: Path,
+    prompt: str,
+    log_path: Path,
+    read_only: bool = False,
+    output_schema: Path | None = None,
+) -> tuple[int, str]:
+    prompt = with_json_schema_prompt(prompt, output_schema)
+    command = ["claude", "-p"]
+    if read_only:
+        with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
+            review_root = Path(tmp_dir) / root.name
+            shutil.copytree(root, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
+            return run_streaming(command, log_path, input_text=prompt, cwd=review_root)
+    return run_streaming(command, log_path, input_text=prompt, cwd=root)
+
+
+def run_agent(
+    agent: str,
+    root: Path,
+    prompt: str,
+    log_path: Path,
+    read_only: bool = False,
+    output_schema: Path | None = None,
+) -> tuple[int, str]:
+    if agent == "codex":
+        return run_codex_agent(root, prompt, log_path, read_only=read_only, output_schema=output_schema)
+    if agent == "claude":
+        return run_claude_agent(root, prompt, log_path, read_only=read_only, output_schema=output_schema)
+    return 1, f"Unsupported agent: {agent}"
 
 
 def is_agent_infrastructure_failure(agent: str, output: str) -> bool:

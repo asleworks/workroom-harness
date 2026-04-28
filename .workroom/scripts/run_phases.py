@@ -9,15 +9,14 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_runner import check_agent, is_agent_infrastructure_failure, resolve_agent, run_codex_agent
+from agent_runner import check_agent, is_agent_infrastructure_failure, parse_review_result, resolve_agent, run_agent as run_agent_process
 from validate_phases import validate_task, validate_top_index
 
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
+REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
 MAX_RETRIES = 3
-APPROVED = "REVIEW_DECISION: APPROVED"
-CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
 RUNNABLE_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying"}
 STOP_PHASE_STATUSES = {"blocked", "error"}
 
@@ -70,11 +69,14 @@ def run(
     return result.returncode, output
 
 
-def run_agent(agent: str, prompt: str, log_path: Path, read_only: bool = False) -> tuple[int, str]:
-    if agent == "codex":
-        return run_codex_agent(ROOT, prompt, log_path, read_only=read_only)
-
-    return 1, f"Unsupported agent: {agent}"
+def run_agent(
+    agent: str,
+    prompt: str,
+    log_path: Path,
+    read_only: bool = False,
+    output_schema: Path | None = None,
+) -> tuple[int, str]:
+    return run_agent_process(agent, ROOT, prompt, log_path, read_only=read_only, output_schema=output_schema)
 
 
 def summarize_runner_error(output: str) -> str:
@@ -191,6 +193,41 @@ def extract_phase_summary(output: str, fallback: str) -> str:
     return fallback
 
 
+def current_change_snapshot() -> str:
+    sections: list[str] = []
+    for title, command in [
+        ("git status --short", ["git", "status", "--short"]),
+        ("git diff --stat", ["git", "diff", "--stat"]),
+        ("git diff", ["git", "diff", "--"]),
+    ]:
+        code, output = run(command)
+        if code == 0 and output.strip():
+            sections.append(f"## {title}\n\n```text\n{output[:50000]}\n```")
+        elif code != 0:
+            sections.append(f"## {title}\n\n```text\n{output[:5000]}\n```")
+    return "\n\n".join(sections) or "No repository changes detected by git."
+
+
+def review_feedback(result: dict) -> str:
+    lines = [
+        "Review requested changes.",
+        "",
+        f"Summary: {result.get('summary', '').strip()}",
+    ]
+    for key, title in [
+        ("blocking_issues", "Blocking Issues"),
+        ("missing_tests", "Missing Tests"),
+        ("architecture_violations", "Architecture Violations"),
+        ("recommended_fixes", "Recommended Fixes"),
+    ]:
+        items = [str(item).strip() for item in result.get(key, []) if str(item).strip()]
+        if items:
+            lines.append("")
+            lines.append(f"{title}:")
+            lines.extend(f"- {item}" for item in items)
+    return "\n".join(lines).strip()
+
+
 def phase_prompt(
     context_path: Path | None,
     task_name: str,
@@ -300,6 +337,7 @@ def review_prompt(
     phase_file: Path,
     verify_output: str,
     previous_summaries: list[str],
+    change_snapshot: str,
 ) -> str:
     summaries = "\n".join(f"- {item}" for item in previous_summaries) or "- None"
     context_ref = context_path.relative_to(ROOT)
@@ -329,22 +367,19 @@ Inspect the current repository diff, changed files, verification output, phase a
 
 {verify_output}
 
+## Repository Change Snapshot
+
+{change_snapshot}
+
 ## Required Review Output
 
 Follow `.workroom/workflows/review.md`.
 
-Your output must contain exactly one of these decision lines:
+Return only the structured JSON object required by `.workroom/schemas/review-result.schema.json`.
 
-- `REVIEW_DECISION: APPROVED`
-- `REVIEW_DECISION: CHANGES_REQUESTED`
-
-Use `REVIEW_DECISION: APPROVED` only if there are no blocking issues and the phase satisfies its acceptance criteria.
-Use `REVIEW_DECISION: CHANGES_REQUESTED` if the worker must change anything before the next phase.
+Use `"decision": "APPROVED"` only if there are no blocking issues and the phase satisfies its acceptance criteria.
+Use `"decision": "CHANGES_REQUESTED"` if the worker must change anything before the next phase.
 """
-
-
-def review_approved(output: str) -> bool:
-    return APPROVED in output and CHANGES_REQUESTED not in output
 
 
 def first_runnable_phase(index: dict) -> tuple[dict, list[str]] | tuple[None, list[str]]:
@@ -378,9 +413,9 @@ def main() -> int:
     parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases/. If omitted, auto-select one planned task.")
     parser.add_argument(
         "--agent",
-        choices=["auto", "codex"],
+        choices=["auto", "codex", "claude"],
         default="auto",
-        help="Agent runner to use. auto selects Codex when available.",
+        help="Agent runner to use. auto prefers Codex, then Claude.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the first prompt without calling an agent")
     args = parser.parse_args()
@@ -406,7 +441,7 @@ def main() -> int:
     agent = resolve_agent(args.agent)
 
     if not args.dry_run and not check_agent(agent):
-        print("ERROR: No supported agent CLI found. Install Codex, or use --dry-run.")
+        print("ERROR: No supported agent CLI found. Install Codex or Claude, or use --dry-run.")
         return 1
 
     index = read_json(index_path)
@@ -502,30 +537,47 @@ def main() -> int:
                     )
                     review_code, review_output = run_agent(
                         agent,
-                        review_prompt(context_path, task_name, phase_file, verify_output, previous_summaries),
+                        review_prompt(
+                            context_path,
+                            task_name,
+                            phase_file,
+                            verify_output,
+                            previous_summaries,
+                            current_change_snapshot(),
+                        ),
                         review_log_path,
                         read_only=True,
+                        output_schema=REVIEW_SCHEMA,
                     )
                     if review_code != 0:
                         if is_agent_infrastructure_failure(agent, review_output):
                             return abort_agent_infrastructure_failure(agent, review_output, review_log_path, index_path, phase["id"])
                         feedback = "Review agent failed to run.\n\n" + review_output
                         print(feedback)
-                    elif review_approved(review_output):
-                        print(f"Review approved {phase['id']}")
-                        index = read_json(index_path)
-                        for item in index["phases"]:
-                            if item["id"] == phase["id"]:
-                                item["status"] = "completed"
-                                item["completed_at"] = stamp()
-                                item["summary"] = extract_phase_summary(worker_output, f"{phase['title']} completed")
-                                previous_summaries.append(f"{phase['id']}: {item['summary']}")
-                                break
-                        write_json(index_path, index)
-                        break
-
                     else:
-                        feedback = "Review requested changes.\n\n" + review_output
+                        review_result = parse_review_result(review_output)
+                        if review_result is None:
+                            return abort_agent_infrastructure_failure(
+                                agent,
+                                "ERROR: Review agent returned invalid structured JSON.\n\n" + review_output,
+                                review_log_path,
+                                index_path,
+                                phase["id"],
+                            )
+                        if review_result["decision"] == "APPROVED":
+                            print(f"Review approved {phase['id']}")
+                            index = read_json(index_path)
+                            for item in index["phases"]:
+                                if item["id"] == phase["id"]:
+                                    item["status"] = "completed"
+                                    item["completed_at"] = stamp()
+                                    item["summary"] = extract_phase_summary(worker_output, f"{phase['title']} completed")
+                                    previous_summaries.append(f"{phase['id']}: {item['summary']}")
+                                    break
+                            write_json(index_path, index)
+                            break
+
+                        feedback = review_feedback(review_result)
                         print(feedback)
                 else:
                     feedback = "Verification failed.\n\n" + verify_output

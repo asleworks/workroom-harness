@@ -1,6 +1,6 @@
 # Workroom Harness
 
-Codex용 AI 코딩 에이전트 실행 하네스입니다.
+Codex와 Claude Code용 AI 코딩 에이전트 실행 하네스입니다.
 
 하네스가 소유하는 파일은 모두 `.workroom/` 안에 설치됩니다. 기존 프로젝트의 `docs/`, `scripts/`, `AGENTS.md`와 충돌하지 않게 하기 위해서입니다.
 
@@ -14,6 +14,7 @@ Codex용 AI 코딩 에이전트 실행 하네스입니다.
 └── templates/       phase 템플릿
 
 .agents/skills/      Codex용 skill
+.claude/skills/      Claude Code용 skill
 ```
 
 ## 설치
@@ -22,6 +23,12 @@ Codex용:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash
+```
+
+Claude Code용:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-claude.sh | bash
 ```
 
 포크나 테스트 레포를 설치할 때는 환경변수로 대상 저장소를 바꿀 수 있습니다.
@@ -51,6 +58,12 @@ python3 .workroom/scripts/doctor.py
 curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash -s -- --overwrite
 ```
 
+Claude Code만 설치한 프로젝트라면 Claude 설치 스크립트에 같은 옵션을 붙입니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-claude.sh | bash -s -- --overwrite
+```
+
 `--overwrite`는 하네스 소유의 scripts, workflows, templates, skills를 갱신합니다. 프로젝트 상태 파일인 `.workroom/AGENTS.md`, `.workroom/docs/`, `.workroom/phases/`, `.workroom/scripts/verify.sh`는 보존합니다.
 
 ## 사용법
@@ -65,6 +78,12 @@ Codex:
 $workroom-plan
 ```
 
+Claude Code:
+
+```text
+/workroom-plan
+```
+
 아이디어를 말하면 에이전트가 질문을 하면서 `.workroom/AGENTS.md`와 `.workroom/docs/`를 채웁니다. 마지막에는 fresh docs reviewer run과 `python3 .workroom/scripts/validate_docs.py`를 통과해야 끝납니다. 리뷰가 승인하지 않으면 문서를 고치고 다시 리뷰합니다.
 
 ### 2. Phase 설계
@@ -75,6 +94,12 @@ Codex:
 $workroom-phase
 ```
 
+Claude Code:
+
+```text
+/workroom-phase
+```
+
 채워진 문서를 기반으로 `.workroom/phases/{task-name}/` 아래에 phase 계획을 만듭니다. 구현은 하지 않습니다. 마지막에는 fresh phase-plan reviewer run과 `python3 .workroom/scripts/validate_phases.py {task-name}`를 통과해야 끝납니다. 리뷰가 승인하지 않으면 phase 파일을 고치고 다시 리뷰합니다.
 
 ### 3. 하네스 실행
@@ -83,6 +108,12 @@ Codex:
 
 ```text
 $workroom-harness
+```
+
+Claude Code:
+
+```text
+/workroom-harness
 ```
 
 만들어진 phase를 처음부터 끝까지 실행합니다.
@@ -96,7 +127,7 @@ fresh worker run
 -> next phase
 ```
 
-Codex는 내부적으로 `codex exec`를 씁니다.
+Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 `claude -p`를 씁니다.
 
 ## 직접 수정할 파일
 
@@ -126,15 +157,18 @@ npm run build
 
 ```bash
 python3 /path/to/workroom-harness/.workroom/scripts/install.py /path/to/your-project --agent codex
+python3 /path/to/workroom-harness/.workroom/scripts/install.py /path/to/your-project --agent claude
 ```
 
 ## 원칙
 
 프로젝트 지식, 실행 상태, 스크립트는 `.workroom/` 안에 둡니다.
 
-Codex skill과 runner만 공개 경로로 둡니다.
+도구별 skill과 runner는 분리하고, `.workroom/`의 문서/phase/스크립트는 공유합니다.
 
 ```text
 Codex skill:  .agents/skills/
+Claude skill: .claude/skills/
 Codex runner: codex exec
+Claude runner: claude -p
 ```

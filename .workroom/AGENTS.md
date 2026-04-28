@@ -123,23 +123,27 @@ To execute phase files:
 
 ```bash
 python3 .workroom/scripts/run_phases.py --agent codex
+python3 .workroom/scripts/run_phases.py --agent claude
 ```
 
 If multiple planned or running tasks exist, pass the task name explicitly:
 
 ```bash
 python3 .workroom/scripts/run_phases.py task-name --agent codex
+python3 .workroom/scripts/run_phases.py task-name --agent claude
 ```
 
 Preferred skill entrypoints:
 
-- `$workroom-plan`, then `$workroom-phase`, then `$workroom-harness`
+- Codex: `$workroom-plan`, then `$workroom-phase`, then `$workroom-harness`
+- Claude: `/workroom-plan`, then `/workroom-phase`, then `/workroom-harness`
 
 Plan and phase review gates use fresh read-only review agents through `.workroom/scripts/review_artifacts.py`.
 
 Harness execution uses fresh headless agent runs through `.workroom/scripts/run_phases.py`:
 
 - Codex runner: `codex exec`
+- Claude runner: `claude -p`
 
 Each stage has a review gate:
 

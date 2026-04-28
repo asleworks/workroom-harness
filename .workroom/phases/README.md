@@ -20,6 +20,7 @@ Run created phases with:
 
 ```bash
 python3 .workroom/scripts/run_phases.py --agent codex
+python3 .workroom/scripts/run_phases.py --agent claude
 ```
 
 If multiple planned or running tasks exist, pass `{task-name}` explicitly.

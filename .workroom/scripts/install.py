@@ -11,6 +11,8 @@ CORE_DIRS = [".workroom"]
 
 SKILL_DIRS = {
     "codex": [".agents"],
+    "claude": [".claude"],
+    "both": [".agents", ".claude"],
 }
 
 GITIGNORE_MARKER = "# workroom-harness"
@@ -109,8 +111,8 @@ def main() -> int:
     parser.add_argument("target", nargs="?", default=".", help="Target project directory")
     parser.add_argument(
         "--agent",
-        choices=["codex"],
-        default="codex",
+        choices=["codex", "claude", "both"],
+        default="both",
         help="Which agent skill directories to install",
     )
     parser.add_argument(
@@ -163,9 +165,9 @@ def main() -> int:
     print()
     print("Next steps:")
     print("1. Run python3 .workroom/scripts/doctor.py from the target project.")
-    print("2. Run $workroom-plan in Codex to fill docs.")
+    print("2. Run $workroom-plan in Codex or /workroom-plan in Claude to fill docs.")
     print("3. Edit .workroom/scripts/verify.sh so it runs your real checks.")
-    print("4. Use $workroom-phase and $workroom-harness in Codex.")
+    print("4. Use $workroom-phase and $workroom-harness in Codex, or /workroom-phase and /workroom-harness in Claude.")
     return 0
 
 

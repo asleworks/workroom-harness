@@ -74,35 +74,37 @@ Check:
 
 ## Output Format
 
-```markdown
-# Review Result
+Return only a JSON object matching `.workroom/schemas/review-result.schema.json`.
 
-REVIEW_DECISION: APPROVED
+Approved example:
+
+```json
+{
+  "decision": "APPROVED",
+  "summary": "The reviewed artifact satisfies the relevant criteria.",
+  "blocking_issues": [],
+  "missing_tests": [],
+  "architecture_violations": [],
+  "recommended_fixes": []
+}
 ```
 
-or:
+Changes requested example:
 
-```markdown
-# Review Result
-
-REVIEW_DECISION: CHANGES_REQUESTED
-
-## Summary
-
-## Blocking Issues
-
-## Non-blocking Suggestions
-
-## Missing Tests
-
-## Architecture Violations
-
-## Recommended Fixes
+```json
+{
+  "decision": "CHANGES_REQUESTED",
+  "summary": "The reviewed artifact needs changes before approval.",
+  "blocking_issues": ["Describe each blocking issue concretely."],
+  "missing_tests": ["Describe each required missing verification."],
+  "architecture_violations": ["Describe each architecture rule violation."],
+  "recommended_fixes": ["Describe the smallest reasonable fixes."]
+}
 ```
 
 ## Decision Rules
 
-- Use `REVIEW_DECISION: APPROVED` only when the reviewed artifact satisfies the relevant mode criteria.
-- Use `REVIEW_DECISION: CHANGES_REQUESTED` when docs, phase files, code, tests, or behavior must change before approval.
+- Use `"decision": "APPROVED"` only when the reviewed artifact satisfies the relevant mode criteria.
+- Use `"decision": "CHANGES_REQUESTED"` when docs, phase files, code, tests, or behavior must change before approval.
 - Keep review findings concrete enough for a worker agent to fix without asking for interpretation.
 - Do not edit files during review. Review is read-only.

@@ -27,7 +27,7 @@ Describe the outcome this phase must produce.
 - The phase matches documented scope.
 - The implementation follows architecture rules.
 - `.workroom/scripts/verify.sh` passes.
-- The review agent returns `REVIEW_DECISION: APPROVED`.
+- The review agent returns structured JSON with `"decision": "APPROVED"`.
 
 ## Verification
 
