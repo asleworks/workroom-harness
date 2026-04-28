@@ -7,6 +7,8 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -14,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent_runner
 import run_phases
+import workroom_status
 from agent_runner import ignore_read_only_copy_items, parse_review_result
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
@@ -33,6 +36,7 @@ from run_phases import (
     retryable_pause_exit_code,
     summarize_phase_failure,
     verification_feedback,
+    write_json,
 )
 
 
@@ -166,6 +170,31 @@ def test_record_deferred_requirement() -> None:
 
         updated = json.loads(index_path.read_text(encoding="utf-8"))
         assert updated["phases"][0]["deferred_requirements"] == ["Set YOUTUBE_API_KEY before live verification"]
+
+
+def test_atomic_json_write() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "index.json"
+        write_json(path, {"phases": [{"id": "phase-01", "status": "running"}]})
+        assert json.loads(path.read_text(encoding="utf-8"))["phases"][0]["id"] == "phase-01"
+        assert not list(Path(tmp).glob(".*.tmp"))
+
+
+def test_status_json_read_retries_during_update() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "index.json"
+        path.write_text('{"phases": [', encoding="utf-8")
+
+        def finish_write() -> None:
+            time.sleep(0.05)
+            path.write_text('{"phases": []}', encoding="utf-8")
+
+        writer = threading.Thread(target=finish_write)
+        writer.start()
+        try:
+            assert workroom_status.read_json(path, attempts=10, delay_seconds=0.02) == {"phases": []}
+        finally:
+            writer.join()
 
 
 def test_deferred_requirements_are_collected() -> None:
@@ -323,6 +352,8 @@ def main() -> int:
         test_deferable_blocked_reasons,
         test_deferable_verification_failures,
         test_record_deferred_requirement,
+        test_atomic_json_write,
+        test_status_json_read_retries_during_update,
         test_deferred_requirements_are_collected,
         test_worker_stop_states_become_feedback,
         test_codex_session_preflight_detects_permission_issue,

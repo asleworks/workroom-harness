@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 
@@ -9,8 +10,18 @@ WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 
 
-def read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def read_json(path: Path, attempts: int = 20, delay_seconds: float = 0.05) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            last_error = error
+            if attempt + 1 == attempts:
+                break
+            time.sleep(delay_seconds)
+    assert last_error is not None
+    raise last_error
 
 
 def discover_tasks() -> list[str]:
@@ -74,8 +85,13 @@ def print_status(task_name: str) -> int:
         print(f"ERROR: phase task not found: .workroom/phases/{task_name}")
         return 1
 
-    index = read_json(index_path)
-    status = read_json(status_path) if status_path.exists() else {}
+    try:
+        index = read_json(index_path)
+        status = read_json(status_path) if status_path.exists() else {}
+    except json.JSONDecodeError as error:
+        print(f"ERROR: status files are being updated or contain invalid JSON: {error}")
+        print("Retry the status command in a moment. The harness phase state was not modified.")
+        return 1
     phase = current_phase(index)
     phases = [item for item in index.get("phases", []) if isinstance(item, dict)]
     completed = sum(1 for item in phases if item.get("status") == "completed")
