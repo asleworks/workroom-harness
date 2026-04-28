@@ -21,6 +21,7 @@ REQUIRED_FILES = [
     ".workroom/workflows/harness.md",
     ".workroom/workflows/review.md",
     ".workroom/workflows/fix.md",
+    ".workroom/schemas/review-result.schema.json",
     ".workroom/scripts/verify.sh",
     ".workroom/scripts/validate_docs.py",
     ".workroom/scripts/scaffold_phases.py",

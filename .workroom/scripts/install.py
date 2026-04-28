@@ -72,8 +72,10 @@ def install_gitignore(target: Path, dry_run: bool) -> list[tuple[str, Path]]:
     path = target / ".gitignore"
     ignore_lines = [
         ".workroom/phases/**/*.log",
+        ".workroom/phases/**/*.log.final",
         ".workroom/phases/**/context.md",
         ".workroom/reviews/*.log",
+        ".workroom/reviews/*.log.final",
     ]
     section = f"""
 

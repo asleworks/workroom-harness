@@ -88,7 +88,7 @@ Run a fresh read-only review agent:
 python3 .workroom/scripts/review_artifacts.py docs --agent auto
 ```
 
-The review agent uses `.workroom/workflows/review.md` in `docs` mode.
+The review agent uses `.workroom/workflows/review.md` in `docs` mode and returns structured JSON validated by `.workroom/schemas/review-result.schema.json`.
 
 Check:
 
@@ -100,9 +100,9 @@ Check:
 - AGENTS rules match the project docs
 - unresolved questions are explicit
 
-If review returns `REVIEW_DECISION: CHANGES_REQUESTED`, improve the docs and run the review agent again.
+If the review script exits `2` with `"decision": "CHANGES_REQUESTED"`, improve the docs and run the review agent again.
 
-Do not continue to validation until the fresh review agent returns `REVIEW_DECISION: APPROVED`.
+Do not continue to validation until the fresh review script exits `0` with `"decision": "APPROVED"`.
 
 ## 5. Validate
 
@@ -118,6 +118,6 @@ Fix validation failures before finishing.
 
 Stop when:
 
-- fresh docs review agent returns `REVIEW_DECISION: APPROVED`
+- fresh docs review script exits `0` with `"decision": "APPROVED"`
 - `python3 .workroom/scripts/validate_docs.py` passes
 - no implementation or phase files were created

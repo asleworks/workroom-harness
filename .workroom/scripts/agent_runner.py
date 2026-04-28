@@ -145,24 +145,41 @@ def run_streaming(
         return process.returncode or 0, "".join(output_parts)
 
 
-def run_codex_agent(root: Path, prompt: str, log_path: Path, read_only: bool = False) -> tuple[int, str]:
-    return run_streaming(
-        [
-            "codex",
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--cd",
-            str(root),
-            "--sandbox",
-            "read-only" if read_only else "workspace-write",
-            "--ephemeral",
-            "-",
-        ],
+def run_codex_agent(
+    root: Path,
+    prompt: str,
+    log_path: Path,
+    read_only: bool = False,
+    output_schema: Path | None = None,
+) -> tuple[int, str]:
+    final_message_path = log_path.with_suffix(log_path.suffix + ".final")
+    command = [
+        "codex",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--cd",
+        str(root),
+        "--sandbox",
+        "read-only" if read_only else "workspace-write",
+        "--ephemeral",
+        "--output-last-message",
+        str(final_message_path),
+    ]
+    if output_schema is not None:
+        command.extend(["--output-schema", str(output_schema)])
+    command.append("-")
+    code, transcript = run_streaming(
+        command,
         log_path,
         input_text=prompt,
         cwd=root,
     )
+    if code == 0 and final_message_path.exists():
+        final_message = final_message_path.read_text(encoding="utf-8")
+        if final_message.strip():
+            return code, final_message
+    return code, transcript
 
 
 def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
