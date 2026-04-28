@@ -126,7 +126,7 @@ python3 .workroom/scripts/run_phases.py --agent codex
 python3 .workroom/scripts/run_phases.py --agent claude
 ```
 
-If multiple planned or running tasks exist, pass the task name explicitly:
+If multiple runnable tasks exist, pass the task name explicitly:
 
 ```bash
 python3 .workroom/scripts/run_phases.py task-name --agent codex

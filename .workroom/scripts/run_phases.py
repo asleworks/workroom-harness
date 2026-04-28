@@ -538,16 +538,6 @@ def collect_deferred_requirements(index: dict) -> list[str]:
     return deferred
 
 
-def extract_phase_summary(output: str, fallback: str) -> str:
-    for line in reversed(output.splitlines()):
-        line = line.strip()
-        if line.startswith("PHASE_SUMMARY:"):
-            summary = line.removeprefix("PHASE_SUMMARY:").strip()
-            if summary:
-                return summary[:500]
-    return fallback
-
-
 def current_change_snapshot() -> str:
     sections: list[str] = []
     for title, command in [
@@ -1127,7 +1117,7 @@ def main() -> int:
                                 if item["id"] == phase["id"]:
                                     item["status"] = "completed"
                                     item["completed_at"] = stamp()
-                                    item["summary"] = extract_phase_summary(worker_output, f"{phase['title']} completed")
+                                    item["summary"] = f"{phase['title']} completed"
                                     for key in [
                                         "last_failed_at",
                                         "last_failure_reason",
