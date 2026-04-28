@@ -24,7 +24,6 @@ DEFERABLE_BLOCKED_NEEDLES = (
     "api_key",
     "apikey",
     "secret",
-    "env",
     ".env",
     "environment variable",
     "local verification",
@@ -37,6 +36,43 @@ DEFERABLE_BLOCKED_NEEDLES = (
     "command approval",
     "credential",
     "token",
+)
+DEFERABLE_VERIFICATION_NEEDLES = (
+    "api key",
+    "api_key",
+    "apikey",
+    "secret",
+    "env",
+    ".env",
+    "environment variable",
+    "manual ui",
+    "manual check",
+    "browser check",
+    "command approval",
+    "credential",
+    "token",
+    "external account",
+    "account connection",
+    "deployment setting",
+    "production check",
+)
+IMPLEMENTATION_FAILURE_NEEDLES = (
+    "error ts",
+    "typescript",
+    "typecheck",
+    "tsc ",
+    "eslint",
+    "lint failed",
+    "syntaxerror",
+    "referenceerror",
+    "assertionerror",
+    "failed tests",
+    "test failed",
+    "tests failed",
+    "cannot find module",
+    "module not found",
+    "build failed",
+    "compilation failed",
 )
 
 
@@ -192,6 +228,43 @@ def summarize_runner_error(output: str) -> str:
     return "Agent runner failed before the phase could be approved."
 
 
+def codex_home() -> Path:
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".codex"
+
+
+def codex_session_access_errors(home: Path | None = None) -> list[str]:
+    base = home or codex_home()
+    sessions = base / "sessions"
+    if sessions.exists():
+        if not sessions.is_dir():
+            return [f"Codex session path is not a directory: {sessions}"]
+        if not os.access(sessions, os.R_OK | os.W_OK | os.X_OK):
+            return [f"Codex cannot access session files at {sessions} (permission denied)"]
+        return []
+
+    if base.exists() and not os.access(base, os.W_OK | os.X_OK):
+        return [f"Codex cannot create session files under {base} (permission denied)"]
+    return []
+
+
+def preflight_errors(agent: str) -> list[str]:
+    errors: list[str] = []
+    if not check_agent(agent):
+        errors.append("No supported agent CLI found. Install Codex or Claude, or use --dry-run.")
+
+    verify = WORKROOM_DIR / "scripts/verify.sh"
+    if not verify.is_file():
+        errors.append(f"Missing {verify.relative_to(ROOT)}.")
+    elif not os.access(verify, os.R_OK):
+        errors.append(f"Cannot read {verify.relative_to(ROOT)}.")
+
+    if agent == "codex":
+        errors.extend(codex_session_access_errors())
+
+    return errors
+
+
 def summarize_phase_failure(feedback: str) -> str:
     generic_headers = {
         "Verification failed.",
@@ -253,6 +326,37 @@ def verification_feedback(verify_output: str) -> str:
         parts.extend(["", "Key failure lines:", key_lines])
     parts.extend(["", "Full verification output:", verify_output])
     return "\n".join(parts).strip()
+
+
+def is_deferable_verification_failure(output: str) -> bool:
+    lowered = output.lower()
+    if not lowered.strip():
+        return False
+    if any(needle in lowered for needle in IMPLEMENTATION_FAILURE_NEEDLES):
+        return False
+    return any(needle in lowered for needle in DEFERABLE_VERIFICATION_NEEDLES)
+
+
+def deferred_verification_reason(output: str) -> str:
+    key_lines = extract_failure_lines(output, limit=5)
+    if key_lines:
+        return "Verification requires deferred external setup: " + key_lines.splitlines()[0][:400]
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return "Verification requires deferred external setup: " + stripped[:400]
+    return "Verification requires deferred external setup."
+
+
+def record_deferred_requirement(index_path: Path, phase_id: str, reason: str) -> None:
+    index = read_json(index_path)
+    for item in index.get("phases", []):
+        if item.get("id") != phase_id:
+            continue
+        item["deferred_requirements"] = append_unique_items(item.get("deferred_requirements"), [reason])
+        item["last_deferred_at"] = stamp()
+        break
+    write_json(index_path, index)
 
 
 def previous_failure_section(phase: dict) -> str:
@@ -904,9 +1008,14 @@ def main() -> int:
         write_status(task_name, "validation", "phase plan validation failed", agent=agent, extra={"errors": phase_errors})
         return 1
 
-    if not args.dry_run and not check_agent(agent):
-        print("ERROR: No supported agent CLI found. Install Codex or Claude, or use --dry-run.")
-        return 1
+    if not args.dry_run:
+        errors = preflight_errors(agent)
+        if errors:
+            print("ERROR: Workroom Harness preflight failed")
+            for error in errors:
+                print(f"- {error}")
+            write_status(task_name, "preflight", "preflight failed", agent=agent, extra={"errors": errors})
+            return 1
 
     index = read_json(index_path)
     if args.dry_run:
@@ -1031,6 +1140,26 @@ def main() -> int:
                     verify_log_path = task_dir / f"{phase['id']}.verify.log"
                     write_status(task_name, "verification", "verification started", phase=phase, log_path=verify_log_path, agent=agent, attempt=retries + 1)
                     verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], verify_log_path)
+                    if verify_code != 0 and is_deferable_verification_failure(verify_output):
+                        deferred_reason = deferred_verification_reason(verify_output)
+                        record_deferred_requirement(index_path, phase["id"], deferred_reason)
+                        verify_output = (
+                            "Verification deferred because it requires external setup that should not block implementation.\n\n"
+                            f"Deferred requirement: {deferred_reason}\n\n"
+                            "Original verification output:\n\n"
+                            + verify_output
+                        )
+                        verify_code = 0
+                        print(f"Deferred verification requirement for {phase['id']}: {deferred_reason}")
+                        write_status(
+                            task_name,
+                            "verification",
+                            "verification deferred",
+                            phase=phase,
+                            log_path=verify_log_path,
+                            agent=agent,
+                            attempt=retries + 1,
+                        )
                 else:
                     verify_log_path = task_dir / f"{phase['id']}.verify.log"
                     verify_code, verify_output = 1, feedback

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,12 @@ REQUIRED_FILES = [
     ".workroom/templates/phase-index.template.json",
     ".workroom/templates/phase.template.md",
 ]
+
+
+def python_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
 
 
 def check_file(path: str) -> bool:
@@ -82,6 +89,7 @@ def check_docs() -> bool:
         cwd=ROOT,
         text=True,
         capture_output=True,
+        env=python_env(),
     )
     print(f"{'OK' if result.returncode == 0 else 'WARN'}  project docs validation")
     if result.stdout.strip():
@@ -97,6 +105,7 @@ def check_selftest() -> bool:
         cwd=ROOT,
         text=True,
         capture_output=True,
+        env=python_env(),
     )
     print(f"{'OK' if result.returncode == 0 else 'FAIL'}  Workroom Harness self-test")
     if result.stdout.strip():

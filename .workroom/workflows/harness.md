@@ -51,6 +51,7 @@ python3 .workroom/scripts/run_phases.py {task-name} --agent claude
 
 The script is the harness engine. It is responsible for:
 
+- running preflight checks for the selected agent, runner session access, and harness verification script before phase work starts
 - writing a phase-local context snapshot at `.workroom/phases/{task-name}/context.md`
 - sending each phase to a fresh headless worker run
 - running `.workroom/scripts/verify.sh`
@@ -66,9 +67,11 @@ Codex uses `codex exec`. Claude Code uses `claude -p` with `--permission-mode by
 
 Runner safeguards:
 
+- Agent CLI or session-permission failures stop before phase work when they can be detected up front.
 - Agent output is streamed into the phase log while the process is running.
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
 - Routine verification or review failures are treated as internal fix-loop feedback. The default CLI output stays concise and points to logs; use `--verbose` to print full failure output on each attempt.
+- Verification failures caused only by deferred external setup, such as API keys, secrets, account connections, command approval, or manual checks, are recorded as `deferred_requirements` and do not stop implementation mid-run.
 - Workers must not mark a phase blocked only because local verification, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. They should implement what they can, summarize skipped local checks, and let the harness verification/review loop decide.
 - API keys, secrets, account connections, deployment settings, and manual checks that are needed only after implementation should be recorded as `deferred_requirements`, not `blocked`.
 - `WORKROOM_PHASE_MAX_ATTEMPTS` controls the per-phase safety budget. Default: `50`.
