@@ -91,6 +91,14 @@ def decision_code(output: str) -> int:
     return 1
 
 
+def review_exit_code(decision: int, strict_exit_codes: bool) -> int:
+    if decision == 0:
+        return 0
+    if decision == 2:
+        return 2 if strict_exit_codes else 0
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a fresh read-only Workroom review agent.")
     parser.add_argument("mode", choices=["docs", "phases"], help="Artifact type to review")
@@ -100,6 +108,11 @@ def main() -> int:
         choices=["auto", "codex", "claude"],
         default="auto",
         help="Reviewer agent to use. auto prefers Codex, then Claude.",
+    )
+    parser.add_argument(
+        "--strict-exit-codes",
+        action="store_true",
+        help="Return exit code 2 for CHANGES_REQUESTED. By default, any valid review decision exits 0.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the reviewer prompt without calling an agent")
     args = parser.parse_args()
@@ -145,13 +158,10 @@ def main() -> int:
     print(output)
     print(f"\nReview log: {log_path.relative_to(ROOT)}")
     decision = decision_code(output)
-    if decision == 0:
-        return 0
-    if decision == 2:
-        return 2
-
-    print('\nERROR: Review output must contain a valid structured JSON decision.')
-    return 1
+    exit_code = review_exit_code(decision, args.strict_exit_codes)
+    if exit_code == 1:
+        print('\nERROR: Review output must contain a valid structured JSON decision.')
+    return exit_code
 
 
 if __name__ == "__main__":

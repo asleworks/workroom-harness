@@ -102,9 +102,11 @@ Check:
 - no phase contains vague manual judgment as its only completion condition
 - no placeholder text remains
 
-If the review script exits `2` with `"decision": "CHANGES_REQUESTED"`, improve the phase files and run the review agent again.
+The review script exits `0` for any valid review decision. Inspect the JSON decision, not only the shell exit code.
 
-Do not continue to harness execution until the fresh review script exits `0` with `"decision": "APPROVED"`.
+If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the phase files using the concrete review fields and run the review agent again.
+
+Do not continue to harness execution until the fresh review JSON contains `"decision": "APPROVED"`.
 
 After the fresh phase-plan review agent approves, run validation again:
 

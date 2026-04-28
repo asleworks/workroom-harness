@@ -18,8 +18,9 @@ Required behavior:
 7. Write `index.json` and one `phase-XX.md` file per phase.
 8. Run `python3 .workroom/scripts/validate_phases.py {task-name}`.
 9. Run `python3 .workroom/scripts/review_artifacts.py phases {task-name} --agent claude`.
-10. Improve phase files and rerun the fresh review script until it exits `0` with `"decision": "APPROVED"`.
-11. Run `python3 .workroom/scripts/validate_phases.py {task-name}` again after review changes.
-12. Do not implement product code.
+10. If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the phase files using `blocking_issues`, `missing_tests`, `architecture_violations`, and `recommended_fixes`, then rerun the fresh review script.
+11. Continue until the review JSON contains `"decision": "APPROVED"`.
+12. Run `python3 .workroom/scripts/validate_phases.py {task-name}` again after review changes.
+13. Do not implement product code.
 
 The phase files must be self-contained because `/workroom-harness` will run each phase in a fresh worker agent context.

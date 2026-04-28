@@ -100,9 +100,11 @@ Check:
 - AGENTS rules match the project docs
 - unresolved questions are explicit
 
-If the review script exits `2` with `"decision": "CHANGES_REQUESTED"`, improve the docs and run the review agent again.
+The review script exits `0` for any valid review decision. Inspect the JSON decision, not only the shell exit code.
 
-Do not continue to validation until the fresh review script exits `0` with `"decision": "APPROVED"`.
+If the review JSON contains `"decision": "CHANGES_REQUESTED"`, improve the docs using the concrete review fields and run the review agent again.
+
+Do not continue to validation until the fresh review JSON contains `"decision": "APPROVED"`.
 
 ## 5. Validate
 
@@ -118,6 +120,6 @@ Fix validation failures before finishing.
 
 Stop when:
 
-- fresh docs review script exits `0` with `"decision": "APPROVED"`
+- fresh docs review JSON contains `"decision": "APPROVED"`
 - `python3 .workroom/scripts/validate_docs.py` passes
 - no implementation or phase files were created
