@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
+DECISION_RE = re.compile(r"(?m)^\s*REVIEW_DECISION:\s*(APPROVED|CHANGES_REQUESTED)\s*$")
 
 
 def stamp() -> str:
@@ -92,12 +94,18 @@ Use `REVIEW_DECISION: CHANGES_REQUESTED` if the planning agent must change any p
 """
 
 
+def extract_decision(output: str) -> str | None:
+    matches = DECISION_RE.findall(output)
+    if matches:
+        return matches[-1]
+    return None
+
+
 def decision_code(output: str) -> int:
-    approved = APPROVED in output
-    changes = CHANGES_REQUESTED in output
-    if approved and not changes:
+    decision = extract_decision(output)
+    if decision == "APPROVED":
         return 0
-    if changes and not approved:
+    if decision == "CHANGES_REQUESTED":
         return 2
     return 1
 
