@@ -87,6 +87,27 @@ def summarize_runner_error(output: str) -> str:
     return "Agent runner failed before the phase could be approved."
 
 
+def summarize_phase_failure(feedback: str) -> str:
+    generic_headers = {
+        "Verification failed.",
+        "Review requested changes.",
+        "Worker agent failed.",
+        "Review agent failed to run.",
+    }
+    for line in feedback.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(">"):
+            continue
+        if stripped in generic_headers:
+            continue
+        if stripped.endswith(":"):
+            continue
+        return stripped[:500]
+    return "Phase did not receive verification and review approval."
+
+
 def abort_agent_infrastructure_failure(
     agent: str,
     output: str,
@@ -606,11 +627,15 @@ def main() -> int:
         index = read_json(index_path)
         current = next(item for item in index["phases"] if item["id"] == phase["id"])
         if current.get("status") != "completed":
-            current["status"] = "error"
-            current["failed_at"] = stamp()
-            current["error_message"] = f"Phase did not receive verification and review approval after {MAX_RETRIES} attempts"
+            current["status"] = "pending"
+            current["retries"] = 0
+            current["last_failed_at"] = stamp()
+            current["last_failure_reason"] = summarize_phase_failure(feedback)
+            current["last_failure_attempts"] = MAX_RETRIES
             write_json(index_path, index)
-            update_top_index(task_name, "error")
+            update_top_index(task_name, "running")
+            print(f"Phase {phase['id']} did not receive verification and review approval after {MAX_RETRIES} attempts.")
+            print("The phase has been left pending so the harness can be rerun after fixes or prompt updates.")
             return 1
 
     index = read_json(index_path)

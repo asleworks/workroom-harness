@@ -80,12 +80,18 @@ A phase is complete only when all are true:
 
 ## Failure Handling
 
-If verification or review fails repeatedly:
+If verification or review fails repeatedly without the worker explicitly marking the phase blocked or unrecoverable:
 
 1. keep the logs in the phase directory
-2. mark the phase as `error` or `blocked`
-3. write the concrete reason in `index.json`
-4. stop before starting the next phase
+2. leave the phase `pending`
+3. record `last_failed_at`, `last_failure_reason`, and `last_failure_attempts`
+4. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
+
+If the worker explicitly determines that user action is required or the phase is unrecoverable:
+
+1. mark the phase as `blocked` or `error`
+2. write the concrete reason in `index.json`
+3. stop before starting the next phase
 
 If the agent runner itself fails before verification or review can complete:
 
