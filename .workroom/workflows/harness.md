@@ -42,7 +42,7 @@ In Claude Code, `/workroom-harness` should run:
 python3 .workroom/scripts/run_phases.py --agent claude
 ```
 
-When there is exactly one planned or running task in `.workroom/phases/index.json`, the script selects it automatically. When there are multiple runnable tasks, choose the task explicitly:
+When there is exactly one runnable task in `.workroom/phases/index.json`, the script selects it automatically. When there are multiple runnable tasks, choose the task explicitly:
 
 ```bash
 python3 .workroom/scripts/run_phases.py {task-name} --agent codex
@@ -58,6 +58,7 @@ The script is the harness engine. It is responsible for:
 - sending review findings back to the worker
 - repeating until approval, no-progress stall, or the safety budget
 - updating phase status in `.workroom/phases/{task-name}/index.json`
+- updating `.workroom/phases/{task-name}/status.json` so the main agent can inspect state with `.workroom/scripts/workroom_status.py`
 - preserving each completed phase summary for the next worker and reviewer
 - collecting deferred requirements so externally provided values or manual checks are reported after implementation instead of blocking mid-run
 
@@ -75,6 +76,13 @@ Runner safeguards:
 - `WORKROOM_PHASE_STALL_LIMIT` controls how many consecutive attempts may repeat the same failure and repository state before the harness pauses. Default: `5`.
 - `WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS` controls the wall-clock runner timeout. Default: `7200`.
 - `WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS` is disabled by default. Set it only when a project explicitly wants no-output watchdog behavior.
+
+Status can be checked without searching for processes or tailing logs manually:
+
+```bash
+python3 .workroom/scripts/workroom_status.py
+python3 .workroom/scripts/workroom_status.py {task-name}
+```
 
 ## Phase Completion Rule
 
@@ -101,7 +109,9 @@ If verification or review fails without the worker explicitly marking the phase 
 
 This retryable pause is not a CLI error by default. The script exits `0` so agent shells do not treat normal harness pauses as command failures. Use `--strict-exit-codes` only in CI or external automation that needs a non-zero exit for incomplete runs.
 
-If the worker explicitly determines that user action is required or the phase is unrecoverable:
+If the worker marks a phase `blocked` or `error`, the harness treats that state as feedback first. It asks the next worker attempt to re-check whether the issue can be fixed, deferred, or narrowed. This avoids stopping on routine implementation problems.
+
+If the stop condition remains after retrying and no progress is made:
 
 1. mark the phase as `blocked` or `error`
 2. write the concrete reason in `index.json`

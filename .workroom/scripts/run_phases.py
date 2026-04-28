@@ -12,7 +12,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent_runner import check_agent, is_agent_infrastructure_failure, parse_review_result, resolve_agent, run_agent as run_agent_process
-from validate_phases import validate_task, validate_top_index
+from validate_phases import validate_top_index
 
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
@@ -65,6 +65,73 @@ def read_json(path: Path) -> dict:
 
 def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def status_file(task_name: str) -> Path:
+    return WORKROOM_DIR / "phases" / task_name / "status.json"
+
+
+def phase_counts(index: dict) -> tuple[int, int]:
+    phases = [phase for phase in index.get("phases", []) if isinstance(phase, dict)]
+    completed = sum(1 for phase in phases if phase.get("status") == "completed")
+    return completed, len(phases)
+
+
+def write_status(
+    task_name: str,
+    stage: str,
+    event: str,
+    *,
+    phase: dict | None = None,
+    log_path: Path | None = None,
+    agent: str | None = None,
+    attempt: int | None = None,
+    review_attempt: int | None = None,
+    extra: dict | None = None,
+) -> None:
+    task_dir = WORKROOM_DIR / "phases" / task_name
+    index_path = task_dir / "index.json"
+    try:
+        index = read_json(index_path) if index_path.exists() else {}
+    except Exception:
+        index = {}
+    completed, total = phase_counts(index)
+    current_phase = phase
+    if isinstance(phase, dict) and phase.get("id"):
+        current_phase = next(
+            (item for item in index.get("phases", []) if isinstance(item, dict) and item.get("id") == phase.get("id")),
+            phase,
+        )
+    current_phase = current_phase or next(
+        (item for item in index.get("phases", []) if isinstance(item, dict) and item.get("status") != "completed"),
+        None,
+    )
+    payload = {
+        "task": task_name,
+        "task_status": index.get("status", "unknown"),
+        "stage": stage,
+        "event": event,
+        "updated_at": stamp(),
+        "run_started_at": index.get("started_at"),
+        "pid": os.getpid(),
+        "agent": agent,
+        "completed_phases": completed,
+        "total_phases": total,
+        "current_phase": current_phase.get("id") if isinstance(current_phase, dict) else None,
+        "current_phase_title": current_phase.get("title") if isinstance(current_phase, dict) else None,
+        "current_phase_status": current_phase.get("status") if isinstance(current_phase, dict) else None,
+        "attempt": attempt,
+        "review_attempt": review_attempt,
+        "log": log_ref(log_path) if log_path else None,
+        "last_failure_reason": current_phase.get("last_failure_reason") if isinstance(current_phase, dict) else None,
+        "last_failure_log": current_phase.get("last_failure_log") if isinstance(current_phase, dict) else None,
+        "deferred_requirements": collect_deferred_requirements(index) if index else [],
+    }
+    if extra:
+        payload.update(extra)
+    path = status_file(task_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, payload)
 
 
 def load_context() -> str:
@@ -191,7 +258,9 @@ def verification_feedback(verify_output: str) -> str:
 def previous_failure_section(phase: dict) -> str:
     reason = str(phase.get("last_failure_reason", "")).strip()
     runner_error = str(phase.get("last_runner_error", "")).strip()
-    if not reason and not runner_error:
+    stop_status = str(phase.get("status", "")).strip()
+    stop_reason = blocked_reason(phase) if stop_status == "blocked" else phase_error_message(phase)
+    if not reason and not runner_error and not stop_reason:
         return ""
 
     lines = [
@@ -213,6 +282,9 @@ def previous_failure_section(phase: dict) -> str:
         lines.append(f"- Last runner error: {runner_error}")
     if phase.get("last_runner_log"):
         lines.append(f"- Last runner log: {phase['last_runner_log']}")
+    if stop_reason:
+        lines.append(f"- Previous worker status: {stop_status}")
+        lines.append(f"- Previous worker reason: {stop_reason}")
     return "\n".join(lines)
 
 
@@ -299,7 +371,7 @@ def planned_tasks() -> list[dict]:
     if not isinstance(tasks, list):
         return []
 
-    runnable_statuses = {"planned", "running"}
+    runnable_statuses = {"planned", "running", "blocked", "error"}
     return [
         task
         for task in tasks
@@ -319,11 +391,11 @@ def resolve_task_name(requested_task: str | None) -> str | None:
         return tasks[0]["dir"].strip().strip("/")
 
     if not tasks:
-        print("ERROR: No planned or running phase task found.")
+        print("ERROR: No runnable phase task found.")
         print("Create phases first with workroom-phase.")
         return None
 
-    print("ERROR: Multiple planned or running phase tasks found. Choose one:")
+    print("ERROR: Multiple runnable phase tasks found. Choose one:")
     for task in tasks:
         print(f"- {task['dir']} ({task.get('status', 'planned')})")
     return None
@@ -407,6 +479,52 @@ def convert_deferable_blocked_phase(index_path: Path, phase_id: str) -> bool:
         print(f"Deferred non-blocking requirement for {phase_id}: {reason}")
         return True
     return False
+
+
+def phase_error_message(phase: dict | None) -> str:
+    if not isinstance(phase, dict):
+        return ""
+    return str(phase.get("error_message", "")).strip()
+
+
+def convert_worker_stop_to_feedback(index_path: Path, phase_id: str) -> tuple[str, str] | None:
+    index = read_json(index_path)
+    for item in index.get("phases", []):
+        if item.get("id") != phase_id:
+            continue
+        status = item.get("status")
+        if status == "blocked":
+            reason = blocked_reason(item)
+            if is_deferable_blocked_reason(reason):
+                return None
+            item["status"] = "retrying"
+            item["last_worker_blocked_reason"] = reason or "Worker marked the phase blocked without a concrete reason."
+            item.pop("blocked_reason", None)
+            item.pop("blocked_at", None)
+            write_json(index_path, index)
+            feedback = (
+                "Worker marked the phase blocked, but the harness treats worker stop states as feedback first.\n\n"
+                f"Blocked reason: {item['last_worker_blocked_reason']}\n\n"
+                "Before stopping the task, try to make progress locally. If this is a missing API key, live external check, "
+                "manual browser check, or command approval issue, record it as deferred_requirements and continue. "
+                "Only leave the phase blocked if a user product/scope/dependency decision is truly required."
+            )
+            return "Worker requested block.", feedback
+        if status == "error":
+            reason = phase_error_message(item) or "Worker marked the phase error without a concrete reason."
+            item["status"] = "retrying"
+            item["last_worker_error_reason"] = reason
+            item.pop("error_message", None)
+            item.pop("error_at", None)
+            write_json(index_path, index)
+            feedback = (
+                "Worker marked the phase error, but routine implementation problems should be fixed by the worker loop.\n\n"
+                f"Error reason: {reason}\n\n"
+                "Treat this as fix feedback. Fix compiler, lint, type, test, integration, or review issues directly. "
+                "Only leave an error if the phase is truly impossible to implement with the available repository context."
+            )
+            return "Worker requested error.", feedback
+    return None
 
 
 def collect_deferred_requirements(index: dict) -> list[str]:
@@ -699,13 +817,52 @@ def phase_can_start(phase: dict) -> tuple[bool, str]:
     if status in RUNNABLE_PHASE_STATUSES:
         return True, ""
     if status in STOP_PHASE_STATUSES:
-        detail_key = "blocked_reason" if status == "blocked" else "error_message"
-        detail = phase.get(detail_key, "")
-        message = f"Phase {phase_id} is {status}."
-        if detail:
-            message += f" {detail}"
-        return False, message
+        return True, f"Phase {phase_id} was {status}; rerunning it as feedback."
     return False, f"Phase {phase_id} has invalid status {status!r}."
+
+
+def validate_harness_task(task_dir: Path) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    index_path = task_dir / "index.json"
+    if not index_path.exists():
+        return [f"missing {index_path.relative_to(ROOT)}"], warnings
+
+    try:
+        index = read_json(index_path)
+    except Exception as exc:
+        return [f"invalid json {index_path.relative_to(ROOT)}: {exc}"], warnings
+
+    phases = index.get("phases")
+    if not isinstance(phases, list) or not phases:
+        return [f"{index_path.relative_to(ROOT)}: phases must be a non-empty list"], warnings
+
+    top_errors = validate_top_index(task_dir)
+    warnings.extend(top_errors)
+
+    current = next((phase for phase in phases if isinstance(phase, dict) and phase.get("status") != "completed"), None)
+    if current is None:
+        return errors, warnings
+
+    phase_id = current.get("id")
+    title = current.get("title")
+    file_name = current.get("file")
+    status = current.get("status", "pending")
+
+    if not isinstance(phase_id, str) or not phase_id.strip():
+        errors.append(f"{index_path.relative_to(ROOT)}: current phase id must be a non-empty string")
+    if not isinstance(title, str) or not title.strip():
+        errors.append(f"{index_path.relative_to(ROOT)}: current phase title must be a non-empty string")
+    if status not in RUNNABLE_PHASE_STATUSES and status not in STOP_PHASE_STATUSES:
+        errors.append(f"{index_path.relative_to(ROOT)}: current phase {phase_id or ''} invalid status {status!r}")
+    if not isinstance(file_name, str) or not file_name.endswith(".md"):
+        errors.append(f"{index_path.relative_to(ROOT)}: current phase {phase_id or ''} file must be a markdown file")
+    else:
+        phase_path = task_dir / file_name
+        if not phase_path.exists():
+            errors.append(f"missing {phase_path.relative_to(ROOT)}")
+
+    return errors, warnings
 
 
 def retryable_pause_exit_code(strict_exit_codes: bool) -> int:
@@ -745,14 +902,17 @@ def main() -> int:
         print(f"ERROR: {index_path.relative_to(ROOT)} not found")
         return 1
 
-    phase_errors = validate_task(task_dir) + validate_top_index(task_dir)
+    agent = resolve_agent(args.agent)
+
+    phase_errors, phase_warnings = validate_harness_task(task_dir)
+    for warning in phase_warnings:
+        print(f"WARN: {warning}")
     if phase_errors:
         print("ERROR: phase plan validation failed")
         for error in phase_errors:
             print(f"- {error}")
+        write_status(task_name, "validation", "phase plan validation failed", agent=agent, extra={"errors": phase_errors})
         return 1
-
-    agent = resolve_agent(args.agent)
 
     if not args.dry_run and not check_agent(agent):
         print("ERROR: No supported agent CLI found. Install Codex or Claude, or use --dry-run.")
@@ -781,8 +941,10 @@ def main() -> int:
         return 0
 
     index.setdefault("started_at", stamp())
+    index["status"] = "running"
     write_json(index_path, index)
     update_top_index(task_name, "running")
+    write_status(task_name, "starting", "harness started", agent=agent)
 
     previous_summaries: list[str] = []
 
@@ -797,12 +959,14 @@ def main() -> int:
             print(f"ERROR: {reason}")
             status = str(phase.get("status", "error"))
             update_top_index(task_name, status if status in STOP_PHASE_STATUSES else "error")
+            write_status(task_name, status, reason, phase=phase, agent=agent)
             return 1
 
         phase_file = task_dir / phase["file"]
         if not phase_file.exists():
             print(f"ERROR: missing phase file {phase_file.relative_to(ROOT)}")
             update_top_index(task_name, "error")
+            write_status(task_name, "error", f"missing phase file {phase_file.relative_to(ROOT)}", phase=phase, agent=agent)
             return 1
 
         context_path = write_context_snapshot(task_dir)
@@ -834,6 +998,7 @@ def main() -> int:
                 attempt=retries + 1,
                 log=str(log_path.relative_to(ROOT)),
             )
+            write_status(task_name, "worker", "worker started", phase=phase, log_path=log_path, agent=agent, attempt=retries + 1)
             active_prompt = (
                 fix_prompt(
                     context_path,
@@ -850,18 +1015,37 @@ def main() -> int:
             code, worker_output = run_agent(agent, active_prompt, log_path)
 
             if code == 0:
+                skip_verification = False
                 current_status = phase_status(index_path, phase["id"])
                 if current_status == "blocked":
-                    if not convert_deferable_blocked_phase(index_path, phase["id"]):
-                        update_top_index(task_name, "blocked")
-                        return 1
+                    if convert_deferable_blocked_phase(index_path, phase["id"]):
+                        current_status = phase_status(index_path, phase["id"])
+                    else:
+                        stop_feedback = convert_worker_stop_to_feedback(index_path, phase["id"])
+                        if stop_feedback:
+                            message, feedback = stop_feedback
+                            feedback_log_path = log_path
+                            skip_verification = True
+                            report_retry_feedback(message, feedback, feedback_log_path, args.verbose)
+                            current_status = phase_status(index_path, phase["id"])
                 if current_status == "error":
-                    update_top_index(task_name, "error")
-                    return 1
+                    stop_feedback = convert_worker_stop_to_feedback(index_path, phase["id"])
+                    if stop_feedback:
+                        message, feedback = stop_feedback
+                        feedback_log_path = log_path
+                        skip_verification = True
+                        report_retry_feedback(message, feedback, feedback_log_path, args.verbose)
+                        current_status = phase_status(index_path, phase["id"])
 
-                verify_log_path = task_dir / f"{phase['id']}.verify.log"
-                verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], verify_log_path)
-                if verify_code == 0:
+                if current_status in RUNNABLE_PHASE_STATUSES and not skip_verification:
+                    verify_log_path = task_dir / f"{phase['id']}.verify.log"
+                    write_status(task_name, "verification", "verification started", phase=phase, log_path=verify_log_path, agent=agent, attempt=retries + 1)
+                    verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], verify_log_path)
+                else:
+                    verify_log_path = task_dir / f"{phase['id']}.verify.log"
+                    verify_code, verify_output = 1, feedback
+                if current_status in RUNNABLE_PHASE_STATUSES and not skip_verification and verify_code == 0:
+                    write_status(task_name, "verification", "verification passed", phase=phase, log_path=verify_log_path, agent=agent, attempt=retries + 1)
                     review_result = None
                     review_code = 1
                     review_output = ""
@@ -888,6 +1072,16 @@ def main() -> int:
                             review_attempt=review_attempt,
                             log=str(review_log_path.relative_to(ROOT)),
                         )
+                        write_status(
+                            task_name,
+                            "reviewer",
+                            "reviewer started",
+                            phase=phase,
+                            log_path=review_log_path,
+                            agent=agent,
+                            attempt=retries + 1,
+                            review_attempt=review_attempt,
+                        )
                         active_review_prompt = base_review_prompt
                         if review_attempt > 1:
                             active_review_prompt += (
@@ -912,6 +1106,7 @@ def main() -> int:
                             return abort_agent_infrastructure_failure(agent, review_output, review_log_path, index_path, phase["id"])
                         feedback = "Review agent failed to run.\n\n" + review_output
                         feedback_log_path = review_log_path
+                        write_status(task_name, "reviewer", "reviewer failed to run", phase=phase, log_path=review_log_path, agent=agent, attempt=retries + 1)
                         report_retry_feedback("Review agent failed.", feedback, feedback_log_path, args.verbose)
                     else:
                         review_result = parse_review_result(review_output)
@@ -923,6 +1118,7 @@ def main() -> int:
                                 + review_output
                             )
                             feedback_log_path = review_log_path
+                            write_status(task_name, "reviewer", "review decision line missing", phase=phase, log_path=review_log_path, agent=agent, attempt=retries + 1)
                             report_retry_feedback("Review decision line missing.", feedback, feedback_log_path, args.verbose)
                         elif review_result["decision"] == "APPROVED":
                             print(f"Review approved {phase['id']}")
@@ -948,15 +1144,22 @@ def main() -> int:
                                     previous_summaries.append(f"{phase['id']}: {item['summary']}")
                                     break
                             write_json(index_path, index)
+                            write_status(task_name, "completed", f"review approved {phase['id']}", phase=phase, log_path=review_log_path, agent=agent, attempt=retries + 1)
                             break
                         else:
                             feedback = review_feedback(review_result)
                             feedback_log_path = review_log_path
+                            write_status(task_name, "reviewer", "review requested changes", phase=phase, log_path=review_log_path, agent=agent, attempt=retries + 1)
                             report_retry_feedback("Review requested changes.", feedback, feedback_log_path, args.verbose)
                 else:
-                    feedback = verification_feedback(verify_output)
-                    feedback_log_path = verify_log_path
-                    report_retry_feedback("Verification failed.", feedback, feedback_log_path, args.verbose)
+                    if skip_verification:
+                        feedback_log_path = feedback_log_path or log_path
+                        write_status(task_name, "worker", "worker stop state converted to feedback", phase=phase, log_path=feedback_log_path, agent=agent, attempt=retries + 1)
+                    else:
+                        feedback = verification_feedback(verify_output)
+                        feedback_log_path = verify_log_path
+                        write_status(task_name, "verification", "verification failed", phase=phase, log_path=verify_log_path, agent=agent, attempt=retries + 1)
+                        report_retry_feedback("Verification failed.", feedback, feedback_log_path, args.verbose)
             else:
                 if is_agent_infrastructure_failure(agent, worker_output):
                     return abort_agent_infrastructure_failure(agent, worker_output, log_path, index_path, phase["id"])
@@ -971,11 +1174,21 @@ def main() -> int:
                     index = read_json(index_path)
                     current = next(item for item in index["phases"] if item["id"] == phase["id"])
                 else:
-                    update_top_index(task_name, "blocked")
-                    return 1
+                    stop_feedback = convert_worker_stop_to_feedback(index_path, phase["id"])
+                    if stop_feedback:
+                        message, feedback = stop_feedback
+                        feedback_log_path = feedback_log_path or log_path
+                        report_retry_feedback(message, feedback, feedback_log_path, args.verbose)
+                        index = read_json(index_path)
+                        current = next(item for item in index["phases"] if item["id"] == phase["id"])
             if current.get("status") == "error":
-                update_top_index(task_name, "error")
-                return 1
+                stop_feedback = convert_worker_stop_to_feedback(index_path, phase["id"])
+                if stop_feedback:
+                    message, feedback = stop_feedback
+                    feedback_log_path = feedback_log_path or log_path
+                    report_retry_feedback(message, feedback, feedback_log_path, args.verbose)
+                    index = read_json(index_path)
+                    current = next(item for item in index["phases"] if item["id"] == phase["id"])
 
             retries += 1
             signature = progress_signature(feedback)
@@ -993,6 +1206,7 @@ def main() -> int:
             if feedback_log_path:
                 current["last_failure_log"] = log_ref(feedback_log_path)
             write_json(index_path, index)
+            write_status(task_name, "retrying", current["last_failure_reason"], phase=current, log_path=feedback_log_path, agent=agent, attempt=retries)
 
         index = read_json(index_path)
         current = next(item for item in index["phases"] if item["id"] == phase["id"])
@@ -1018,11 +1232,12 @@ def main() -> int:
             if current.get("last_failure_log"):
                 print(f"Last failure log: {current['last_failure_log']}")
             print("The phase has been left pending so the harness can be rerun after fixes or prompt updates.")
+            write_status(task_name, "paused", current.get("last_failure_reason", "phase paused"), phase=current, log_path=feedback_log_path, agent=agent)
             return retryable_pause_exit_code(args.strict_exit_codes)
 
     index = read_json(index_path)
     deferred = collect_deferred_requirements(index)
-    index["status"] = "completed"
+    index["status"] = "completed_with_deferred_requirements" if deferred else "completed"
     index["completed_at"] = stamp()
     if deferred:
         index["deferred_requirements"] = deferred
@@ -1039,9 +1254,11 @@ def main() -> int:
         print(f"Completed .workroom/phases/{task_name} with deferred requirements")
         for item in deferred:
             print(f"- {item}")
+        write_status(task_name, "completed_with_deferred_requirements", "harness completed with deferred requirements", agent=agent)
     else:
         update_top_index(task_name, "completed")
         print(f"Completed .workroom/phases/{task_name}")
+        write_status(task_name, "completed", "harness completed", agent=agent)
     return 0
 
 

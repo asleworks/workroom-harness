@@ -76,6 +76,7 @@ def install_gitignore(target: Path, dry_run: bool) -> list[tuple[str, Path]]:
         ".workroom/phases/**/*.log",
         ".workroom/phases/**/*.log.final",
         ".workroom/phases/**/context.md",
+        ".workroom/phases/**/status.json",
         ".workroom/reviews/*.log",
         ".workroom/reviews/*.log.final",
     ]
@@ -168,6 +169,7 @@ def main() -> int:
     print("2. Run $workroom-plan in Codex or /workroom-plan in Claude to fill docs.")
     print("3. Edit .workroom/scripts/verify.sh so it runs your real checks.")
     print("4. Use $workroom-phase and $workroom-harness in Codex, or /workroom-phase and /workroom-harness in Claude.")
+    print("5. Use python3 .workroom/scripts/workroom_status.py to inspect a running or paused harness.")
     return 0
 
 

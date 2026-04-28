@@ -96,4 +96,10 @@ Routine compiler, lint, test, and review failures are fed back to the worker int
 
 Review agents write natural-language findings and end with `REVIEW_DECISION: APPROVED` or `REVIEW_DECISION: CHANGES_REQUESTED`. The harness parses only that decision line and passes the review text through as feedback.
 
+Check current harness state without searching for processes or logs:
+
+```bash
+python3 .workroom/scripts/workroom_status.py
+```
+
 Post-implementation actions such as filling API keys, connecting accounts, or running manual external checks should be recorded as `deferred_requirements`. The harness can finish as `completed_with_deferred_requirements` and print those actions at the end instead of blocking midway.

@@ -135,6 +135,12 @@ Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 기본적으로 
 
 리뷰 에이전트는 자연어로 지적 사항을 쓰고 마지막에 `REVIEW_DECISION: APPROVED` 또는 `REVIEW_DECISION: CHANGES_REQUESTED`만 남깁니다. 하네스는 이 결정 줄만 파싱하고, 리뷰 본문은 그대로 워커 피드백으로 전달합니다.
 
+현재 상태는 프로세스나 로그를 직접 뒤지지 말고 아래 명령으로 확인합니다.
+
+```bash
+python3 .workroom/scripts/workroom_status.py
+```
+
 API key 입력, 계정 연결, 외부 서비스 수동 확인처럼 구현 이후에 필요한 작업은 `deferred_requirements`로 기록합니다. 하네스는 중간에 멈추는 대신 `completed_with_deferred_requirements`로 끝내고 마지막에 남은 사용자 액션을 출력할 수 있습니다.
 
 ## 직접 수정할 파일

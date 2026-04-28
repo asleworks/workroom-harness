@@ -92,33 +92,11 @@ def review_text_from_output(output: str) -> str:
     if isinstance(result, str) and result.strip():
         return result
 
-    structured_output = envelope.get("structured_output")
-    if isinstance(structured_output, dict):
-        return json.dumps(structured_output, indent=2, ensure_ascii=False)
-
     return output
-
-
-def legacy_json_review_text(data: dict) -> str:
-    decision = data.get("decision")
-    if decision not in {"APPROVED", "CHANGES_REQUESTED"}:
-        return ""
-
-    body = json.dumps(data, indent=2, ensure_ascii=False)
-    return f"{body}\n\nREVIEW_DECISION: {decision}"
 
 
 def parse_review_result(output: str) -> dict | None:
     text = review_text_from_output(output).strip()
-
-    try:
-        data = json.loads(text)
-    except Exception:
-        data = None
-    if isinstance(data, dict):
-        legacy_text = legacy_json_review_text(data)
-        if legacy_text:
-            text = legacy_text
 
     matches = list(REVIEW_DECISION_PATTERN.finditer(text))
     if not matches:

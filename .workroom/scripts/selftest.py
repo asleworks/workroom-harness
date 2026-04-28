@@ -18,6 +18,7 @@ from agent_runner import ignore_read_only_copy_items, parse_review_result
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
     collect_deferred_requirements,
+    convert_worker_stop_to_feedback,
     current_change_fingerprint,
     fix_prompt,
     is_deferable_blocked_reason,
@@ -42,12 +43,10 @@ def test_review_contract() -> None:
     approved = review_payload("APPROVED")
     changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
     invalid = "Reviewed the work but forgot the machine-readable decision line."
-    legacy_json = json.dumps({"decision": "CHANGES_REQUESTED", "summary": "fix issue"})
 
     assert parse_review_result(approved) is not None
     assert parse_review_result(changes) is not None
     assert parse_review_result(invalid) is None
-    assert parse_review_result(legacy_json) is not None
     assert decision_code(approved) == 0
     assert decision_code(changes) == 2
     assert review_exit_code(2, strict_exit_codes=False) == 0
@@ -57,10 +56,8 @@ def test_review_contract() -> None:
 def test_agent_envelope_review_parsing() -> None:
     changes = review_payload("CHANGES_REQUESTED", ["fix issue"])
     result_envelope = json.dumps({"type": "result", "result": changes})
-    structured_envelope = json.dumps({"type": "result", "structured_output": {"decision": "APPROVED"}})
 
     assert decision_code(result_envelope) == 2
-    assert decision_code(structured_envelope) == 0
 
 
 def test_read_only_copy_ignore() -> None:
@@ -159,6 +156,32 @@ def test_deferred_requirements_are_collected() -> None:
     ]
 
 
+def test_worker_stop_states_become_feedback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index.json"
+        index_path.write_text(
+            json.dumps(
+                {
+                    "phases": [
+                        {
+                            "id": "phase-01",
+                            "status": "error",
+                            "error_message": "TypeScript failed during implementation",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = convert_worker_stop_to_feedback(index_path, "phase-01")
+        assert result is not None
+        message, feedback = result
+        updated = json.loads(index_path.read_text(encoding="utf-8"))
+        assert message == "Worker requested error."
+        assert updated["phases"][0]["status"] == "retrying"
+        assert "TypeScript failed" in feedback
+
+
 def test_retry_output_is_concise_by_default() -> None:
     stream = io.StringIO()
     with contextlib.redirect_stdout(stream):
@@ -216,6 +239,7 @@ def main() -> int:
         test_claude_worker_permission_mode_default,
         test_deferable_blocked_reasons,
         test_deferred_requirements_are_collected,
+        test_worker_stop_states_become_feedback,
         test_retry_output_is_concise_by_default,
         test_progress_tracking_contract,
         test_untracked_file_changes_count_as_progress,

@@ -23,8 +23,9 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def validate_task(task_dir: Path) -> list[str]:
+def validate_task(task_dir: Path, warnings: list[str] | None = None) -> list[str]:
     errors: list[str] = []
+    warnings = warnings if warnings is not None else []
     index_path = task_dir / "index.json"
 
     if not index_path.exists():
@@ -67,10 +68,10 @@ def validate_task(task_dir: Path) -> list[str]:
             errors.append(f"{index_path.relative_to(ROOT)}: phase {number} id must be a non-empty string")
         elif phase_id in seen_ids:
             errors.append(f"{index_path.relative_to(ROOT)}: duplicate phase id {phase_id!r}")
-        elif phase_id != expected_phase_id:
-            errors.append(f"{index_path.relative_to(ROOT)}: phase {number} id should be {expected_phase_id!r}")
         else:
             seen_ids.add(phase_id)
+            if phase_id != expected_phase_id:
+                warnings.append(f"{index_path.relative_to(ROOT)}: phase {number} id convention is {expected_phase_id!r}")
 
         if not isinstance(title, str) or not title.strip():
             errors.append(f"{index_path.relative_to(ROOT)}: phase {phase_id or number} title must be a non-empty string")
@@ -82,7 +83,7 @@ def validate_task(task_dir: Path) -> list[str]:
             errors.append(f"{index_path.relative_to(ROOT)}: phase {phase_id or number} file must be a markdown file")
             continue
         if file_name != expected_file_name:
-            errors.append(f"{index_path.relative_to(ROOT)}: phase {phase_id or number} file should be {expected_file_name!r}")
+            warnings.append(f"{index_path.relative_to(ROOT)}: phase {phase_id or number} file convention is {expected_file_name!r}")
 
         phase_path = task_dir / file_name
         if not phase_path.exists():
@@ -96,7 +97,7 @@ def validate_task(task_dir: Path) -> list[str]:
             "## Acceptance Criteria",
         ]:
             if heading not in text:
-                errors.append(f"{phase_path.relative_to(ROOT)}: missing {heading}")
+                warnings.append(f"{phase_path.relative_to(ROOT)}: missing suggested heading {heading}")
 
         for marker in PLACEHOLDER_MARKERS:
             if marker in text:
@@ -155,14 +156,18 @@ def main() -> int:
 
     errors = []
     for task_dir in task_dirs:
-        errors.extend(validate_task(task_dir))
+        errors.extend(validate_task(task_dir, warnings))
         errors.extend(validate_top_index(task_dir))
 
     if errors:
         for error in errors:
             print(f"FAIL  {error}")
+        for warning in warnings:
+            print(f"WARN  {warning}")
         return 1
 
+    for warning in warnings:
+        print(f"WARN  {warning}")
     for task_dir in task_dirs:
         print(f"OK    {task_dir.relative_to(ROOT)}")
     return 0

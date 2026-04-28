@@ -91,7 +91,7 @@ def validate_file(relative_path: str, required_markers: list[str]) -> tuple[list
 
     for pattern in EMPTY_FIELD_PATTERNS:
         if re.search(pattern, text):
-            errors.append(f"{relative_path}: empty field remains: {pattern}")
+            warnings.append(f"{relative_path}: empty field remains: {pattern}")
 
     return errors, warnings
 

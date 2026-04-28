@@ -31,6 +31,7 @@ REQUIRED_FILES = [
     ".workroom/scripts/install-claude.sh",
     ".workroom/scripts/install.py",
     ".workroom/scripts/run_phases.py",
+    ".workroom/scripts/workroom_status.py",
     ".workroom/templates/phase-index.template.json",
     ".workroom/templates/phase.template.md",
 ]

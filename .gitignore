@@ -10,5 +10,6 @@ coverage/
 *.log
 .workroom/phases/**/*.log
 .workroom/phases/**/context.md
+.workroom/phases/**/status.json
 __pycache__/
 *.pyc
