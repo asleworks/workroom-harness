@@ -166,7 +166,7 @@ Only the harness should mark a phase as `completed`. Worker agents may mark `err
 
 Every completed phase should include a short `summary` that the next worker and reviewer can read.
 
-Repeated verification or review failures are retryable harness pauses by default. The harness should leave the phase `pending`, record `last_failure_reason`, and feed that failure back into the next worker prompt instead of locking the phase as `error`.
+Verification or review failures are worker feedback by default. The harness should keep fixing while the failure or repository diff is changing, and pause only when attempts stall on the same failure and same repository state or hit the safety budget. On pause, leave the phase `pending`, record `last_failure_reason` and `last_failure_log`, and feed that failure back into the next worker prompt instead of locking the phase as `error`.
 
 ## Forbidden Actions
 

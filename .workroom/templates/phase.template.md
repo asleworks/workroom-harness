@@ -44,4 +44,4 @@ If the phase cannot continue, update `index.json` with either:
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
-Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
+Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.

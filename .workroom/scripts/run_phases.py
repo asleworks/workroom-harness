@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -31,7 +32,8 @@ def int_env(name: str, default: int) -> int:
         return default
 
 
-MAX_RETRIES = int_env("WORKROOM_PHASE_MAX_RETRIES", 5)
+MAX_ATTEMPTS = int_env("WORKROOM_PHASE_MAX_ATTEMPTS", int_env("WORKROOM_PHASE_MAX_RETRIES", 50))
+STALL_LIMIT = int_env("WORKROOM_PHASE_STALL_LIMIT", 5)
 
 
 def stamp() -> str:
@@ -185,6 +187,8 @@ def previous_failure_section(phase: dict) -> str:
         lines.append(f"- Last failed at: {phase['last_failed_at']}")
     if phase.get("last_failure_attempts"):
         lines.append(f"- Attempts in last run: {phase['last_failure_attempts']}")
+    if phase.get("last_stalled_attempts"):
+        lines.append(f"- Stalled attempts in last run: {phase['last_stalled_attempts']}")
     if phase.get("last_failure_log"):
         lines.append(f"- Last failure log: {phase['last_failure_log']}")
     if runner_error:
@@ -315,6 +319,36 @@ def current_change_snapshot() -> str:
     return "\n\n".join(sections) or "No repository changes detected by git."
 
 
+def current_change_fingerprint() -> str:
+    parts: list[str] = []
+    for command in [
+        ["git", "status", "--short"],
+        ["git", "diff", "--"],
+        ["git", "diff", "--cached", "--"],
+    ]:
+        code, output = run(command)
+        parts.append(str(code))
+        parts.append(output)
+    code, output = run(["git", "ls-files", "--others", "--exclude-standard", "-z"])
+    parts.append(str(code))
+    if code == 0:
+        for name in sorted(item for item in output.split("\0") if item):
+            path = ROOT / name
+            if not path.is_file():
+                continue
+            parts.append(name)
+            stat = path.stat()
+            parts.append(str(stat.st_size))
+            if stat.st_size <= 1_000_000:
+                parts.append(hashlib.sha256(path.read_bytes()).hexdigest())
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def progress_signature(feedback: str) -> str:
+    value = "\n".join([summarize_phase_failure(feedback), current_change_fingerprint()])
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def review_feedback(result: dict) -> str:
     lines = [
         "Review requested changes.",
@@ -392,7 +426,7 @@ After implementation, update `.workroom/phases/{task_name}/index.json` for this 
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
-Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
+Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -460,7 +494,7 @@ After fixing, update `.workroom/phases/{task_name}/index.json` for this phase on
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
-Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
+Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -655,10 +689,13 @@ def main() -> int:
             return 0
 
         retries = int(phase.get("retries", 0))
+        stalled_attempts = int(phase.get("stalled_attempts", 0))
+        last_progress_signature = str(phase.get("last_progress_signature", ""))
         feedback = ""
         feedback_log_path: Path | None = None
-        while retries < MAX_RETRIES:
-            print(f"Running {phase['id']}: {phase['title']} with {agent} (attempt {retries + 1}/{MAX_RETRIES})")
+        while retries < MAX_ATTEMPTS and stalled_attempts < STALL_LIMIT:
+            stall_note = f", stalled {stalled_attempts}/{STALL_LIMIT}" if stalled_attempts else ""
+            print(f"Running {phase['id']}: {phase['title']} with {agent} (attempt {retries + 1}/{MAX_ATTEMPTS}{stall_note})")
             log_path = task_dir / f"{phase['id']}.worker.{retries + 1}.log"
             set_phase_status(
                 index_path,
@@ -740,6 +777,9 @@ def main() -> int:
                                         "last_runner_error",
                                         "last_runner_log",
                                         "last_failure_log",
+                                        "last_stalled_attempts",
+                                        "last_progress_signature",
+                                        "stalled_attempts",
                                     ]:
                                         item.pop(key, None)
                                     previous_summaries.append(f"{phase['id']}: {item['summary']}")
@@ -771,10 +811,18 @@ def main() -> int:
                 return 1
 
             retries += 1
+            signature = progress_signature(feedback)
+            if signature == last_progress_signature:
+                stalled_attempts += 1
+            else:
+                stalled_attempts = 0
+                last_progress_signature = signature
             current["retries"] = retries
+            current["stalled_attempts"] = stalled_attempts
             current["status"] = "retrying"
             current["last_failed_at"] = stamp()
             current["last_failure_reason"] = summarize_phase_failure(feedback)
+            current["last_progress_signature"] = last_progress_signature
             if feedback_log_path:
                 current["last_failure_log"] = log_ref(feedback_log_path)
             write_json(index_path, index)
@@ -784,14 +832,20 @@ def main() -> int:
         if current.get("status") != "completed":
             current["status"] = "pending"
             current["retries"] = 0
+            current["stalled_attempts"] = 0
             current["last_failed_at"] = stamp()
             current["last_failure_reason"] = summarize_phase_failure(feedback)
-            current["last_failure_attempts"] = MAX_RETRIES
+            current["last_failure_attempts"] = retries
+            current["last_stalled_attempts"] = stalled_attempts
+            current["last_progress_signature"] = last_progress_signature
             if feedback_log_path:
                 current["last_failure_log"] = log_ref(feedback_log_path)
             write_json(index_path, index)
             update_top_index(task_name, "running")
-            print(f"Phase {phase['id']} did not receive verification and review approval after {MAX_RETRIES} attempts.")
+            if stalled_attempts >= STALL_LIMIT:
+                print(f"Phase {phase['id']} paused after {STALL_LIMIT} stalled attempts without new progress.")
+            else:
+                print(f"Phase {phase['id']} did not receive verification and review approval within the {MAX_ATTEMPTS}-attempt safety budget.")
             if current.get("last_failure_reason"):
                 print(f"Last failure: {current['last_failure_reason']}")
             if current.get("last_failure_log"):

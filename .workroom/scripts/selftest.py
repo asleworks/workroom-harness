@@ -15,9 +15,11 @@ import run_phases
 from agent_runner import ignore_read_only_copy_items, normalize_structured_output, parse_review_result
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
+    current_change_fingerprint,
     fix_prompt,
     phase_prompt,
     previous_failure_section,
+    progress_signature,
     report_retry_feedback,
     retryable_pause_exit_code,
     summarize_phase_failure,
@@ -93,7 +95,8 @@ def test_harness_feedback_contract() -> None:
     assert summarize_phase_failure(feedback) == verify_error
     assert retryable_pause_exit_code(strict_exit_codes=False) == 0
     assert retryable_pause_exit_code(strict_exit_codes=True) == 1
-    assert run_phases.MAX_RETRIES >= 5
+    assert run_phases.MAX_ATTEMPTS >= 30
+    assert run_phases.STALL_LIMIT >= 3
 
     prompt = fix_prompt(
         run_phases.ROOT / ".workroom/phases/example/context.md",
@@ -150,6 +153,28 @@ def test_retry_output_is_concise_by_default() -> None:
     assert "phase-01.verify.log" in previous
 
 
+def test_progress_tracking_contract() -> None:
+    first = progress_signature("Verification failed.\n\napp/api/route.ts(1,1): error TS1234")
+    same = progress_signature("Verification failed.\n\napp/api/route.ts(1,1): error TS1234")
+    changed_failure = progress_signature("Verification failed.\n\napp/api/route.ts(2,1): error TS5678")
+
+    assert first == same
+    assert first != changed_failure
+
+
+def test_untracked_file_changes_count_as_progress() -> None:
+    path = run_phases.ROOT / ".workroom/.selftest-progress.tmp"
+    try:
+        path.write_text("first", encoding="utf-8")
+        first = current_change_fingerprint()
+        path.write_text("second", encoding="utf-8")
+        second = current_change_fingerprint()
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert first != second
+
+
 def main() -> int:
     tests = [
         test_review_contract,
@@ -158,6 +183,8 @@ def main() -> int:
         test_harness_feedback_contract,
         test_phase_prompt_status_contract,
         test_retry_output_is_concise_by_default,
+        test_progress_tracking_contract,
+        test_untracked_file_changes_count_as_progress,
     ]
     for test in tests:
         test()

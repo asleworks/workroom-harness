@@ -56,7 +56,7 @@ The script is the harness engine. It is responsible for:
 - running `.workroom/scripts/verify.sh`
 - sending the completed phase to a fresh headless reviewer run
 - sending review findings back to the worker
-- repeating until approval or retry limit
+- repeating until approval, no-progress stall, or the safety budget
 - updating phase status in `.workroom/phases/{task-name}/index.json`
 - preserving each completed phase summary for the next worker and reviewer
 
@@ -67,7 +67,9 @@ Runner safeguards:
 - Agent output is streamed into the phase log while the process is running.
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
 - Routine verification or review failures are treated as internal fix-loop feedback. The default CLI output stays concise and points to logs; use `--verbose` to print full failure output on each attempt.
-- `WORKROOM_PHASE_MAX_RETRIES` controls worker/fix attempts per phase. Default: `5`.
+- `WORKROOM_PHASE_MAX_ATTEMPTS` controls the per-phase safety budget. Default: `50`.
+- `WORKROOM_PHASE_MAX_RETRIES` is kept as a backward-compatible alias when `WORKROOM_PHASE_MAX_ATTEMPTS` is not set.
+- `WORKROOM_PHASE_STALL_LIMIT` controls how many consecutive attempts may repeat the same failure and repository state before the harness pauses. Default: `5`.
 - `WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS` controls the wall-clock runner timeout. Default: `7200`.
 - `WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS` is disabled by default. Set it only when a project explicitly wants no-output watchdog behavior.
 
@@ -82,15 +84,17 @@ A phase is complete only when all are true:
 
 ## Failure Handling
 
-If verification or review fails repeatedly without the worker explicitly marking the phase blocked or unrecoverable:
+If verification or review fails without the worker explicitly marking the phase blocked or unrecoverable:
 
 1. keep the logs in the phase directory
 2. feed the concrete verification/review failure and current repository diff back to the next fix worker
 3. record `last_failed_at` and `last_failure_reason` after each failed attempt
-4. after the retry limit, leave the phase `pending`
-5. record `last_failure_attempts`
-6. include the previous failure in the next worker prompt when the harness is rerun
-7. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
+4. keep running while the failure or repository diff is changing, because that means the workers are still making progress
+5. pause only after the same failure and same repository state repeat for `WORKROOM_PHASE_STALL_LIMIT` attempts, or after the safety budget is exhausted
+6. leave the phase `pending`
+7. record `last_failure_attempts`, `last_stalled_attempts`, and `last_failure_log`
+8. include the previous failure in the next worker prompt when the harness is rerun
+9. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
 
 This retryable pause is not a CLI error by default. The script exits `0` so agent shells do not treat normal harness pauses as command failures. Use `--strict-exit-codes` only in CI or external automation that needs a non-zero exit for incomplete runs.
 

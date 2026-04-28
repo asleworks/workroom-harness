@@ -129,7 +129,7 @@ fresh worker run
 
 Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 `claude -p`를 씁니다.
 
-phase가 retry 한도 안에 검증이나 리뷰를 통과하지 못하면 하네스는 해당 phase에서 멈추고 `pending` 상태와 `last_failure_reason`을 남깁니다. 다음 phase로 넘어가지는 않지만, 이 retry 가능한 pause는 기본적으로 CLI 에러로 처리하지 않습니다. 외부 자동화에서 non-zero exit이 필요할 때만 `--strict-exit-codes`를 씁니다.
+검증이나 리뷰가 실패하면 하네스는 실패 내용을 작업자에게 다시 전달하고, 실패 내용이나 repository diff가 바뀌는 동안은 계속 시도합니다. 같은 실패와 같은 repository 상태가 반복되어 진전이 없거나 phase별 safety budget을 다 쓴 경우에만 멈춥니다. 이때 phase는 `pending` 상태와 `last_failure_reason`, `last_failure_log`를 남기며, 이 retry 가능한 pause는 기본적으로 CLI 에러로 처리하지 않습니다. 외부 자동화에서 non-zero exit이 필요할 때만 `--strict-exit-codes`를 씁니다.
 
 컴파일, lint, test, 리뷰 실패는 기본적으로 워커에게 다시 전달되는 내부 fix-loop 입력입니다. 하네스는 매 시도마다 전체 에러를 터미널에 쏟지 않고 진행 상황과 로그 경로만 출력합니다. 매 시도별 상세 출력을 터미널에서 보고 싶을 때만 `--verbose`를 씁니다.
 
