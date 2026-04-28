@@ -93,3 +93,5 @@ Codex uses `codex exec`. Claude Code uses `claude -p` with `--permission-mode by
 If verification or review fails, the harness feeds the failure back to the worker and keeps trying while the failure or repository diff is changing. It pauses only when attempts stall on the same failure and same repository state, or when the per-phase safety budget is exhausted. The phase is left `pending` with `last_failure_reason` and `last_failure_log`; this retryable pause is not a CLI error unless `--strict-exit-codes` is used.
 
 Routine compiler, lint, test, and review failures are fed back to the worker internally. By default the harness prints concise retry progress and log paths instead of dumping the full failure output on every attempt. Use `--verbose` when you need full per-attempt output in the terminal.
+
+Post-implementation actions such as filling API keys, connecting accounts, or running manual external checks should be recorded as `deferred_requirements`. The harness can finish as `completed_with_deferred_requirements` and print those actions at the end instead of blocking midway.

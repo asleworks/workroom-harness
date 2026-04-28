@@ -7,7 +7,7 @@ from pathlib import Path
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
-ALLOWED_TASK_STATUSES = {"planned", "running", "completed", "error", "blocked"}
+ALLOWED_TASK_STATUSES = {"planned", "running", "completed", "completed_with_deferred_requirements", "error", "blocked"}
 ALLOWED_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying", "completed", "error", "blocked"}
 PLACEHOLDER_MARKERS = [
     "Describe the outcome this phase must produce.",

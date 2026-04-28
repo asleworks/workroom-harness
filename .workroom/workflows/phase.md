@@ -100,6 +100,7 @@ Check:
 - docs updates happen before implementation when needed
 - test/verification expectations are clear
 - required checks are automatable through `.workroom/scripts/verify.sh` or reviewable from code; manual UI/dev-server checks may be optional notes but must not be the only blocking completion condition unless the user explicitly requested manual approval
+- post-implementation API keys, account connections, deployment settings, or manual checks are planned as `deferred_requirements`, not mid-run blockers
 - no phase contains vague manual judgment as its only completion condition
 - no placeholder text remains
 

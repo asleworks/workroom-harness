@@ -71,6 +71,7 @@ When this phase cannot continue, update `.workroom/phases/{task_dir.name}/index.
 
 Do not mark this phase as completed yourself. Do not write `completed_at` or `summary`. The harness marks completion and writes the summary only after verification and review approval.
 Do not mark this phase as blocked only because verification commands, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. Implement the phase, note skipped local checks in `PHASE_SUMMARY`, and let the harness run verification and review.
+If an API key, secret, account connection, deployment setting, or manual check is needed only after implementation, add it to this phase's `"deferred_requirements"` list in `index.json` instead of blocking.
 """,
         encoding="utf-8",
     )

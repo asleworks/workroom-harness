@@ -77,6 +77,8 @@ Harness-owned phase index fields are not implementation deliverables. In impleme
 
 Do not require a worker to mark a phase blocked because local verification, dev-server commands, browser checks, or manual UI checks could not run inside the worker session. Treat skipped local checks as review context. Request concrete code/test fixes when needed, or approve when the phase satisfies acceptance criteria and harness verification passed.
 
+Treat `deferred_requirements` as acceptable when they are post-implementation actions, such as adding an API key for real external traffic or running a manual production check. Do not reject otherwise complete work only because those deferred actions remain.
+
 ## Output Format
 
 Return only a JSON object matching `.workroom/schemas/review-result.schema.json`.

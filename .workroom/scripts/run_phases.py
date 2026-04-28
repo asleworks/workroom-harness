@@ -20,6 +20,25 @@ ROOT = WORKROOM_DIR.parent
 REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
 RUNNABLE_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying"}
 STOP_PHASE_STATUSES = {"blocked", "error"}
+DEFERABLE_BLOCKED_NEEDLES = (
+    "api key",
+    "api_key",
+    "apikey",
+    "secret",
+    "env",
+    ".env",
+    "environment variable",
+    "local verification",
+    "verification",
+    "dev-server",
+    "dev server",
+    "browser check",
+    "manual ui",
+    "manual check",
+    "command approval",
+    "credential",
+    "token",
+)
 
 
 def int_env(name: str, default: int) -> int:
@@ -198,6 +217,19 @@ def previous_failure_section(phase: dict) -> str:
     return "\n".join(lines)
 
 
+def previous_deferred_section(phase: dict) -> str:
+    deferred = normalize_items(phase.get("deferred_requirements"))
+    if not deferred:
+        return ""
+    lines = [
+        "## Deferred Requirements Already Recorded",
+        "",
+        "These are not current implementation blockers. Keep implementing what can be completed locally.",
+    ]
+    lines.extend(f"- {item}" for item in deferred)
+    return "\n".join(lines)
+
+
 def abort_agent_infrastructure_failure(
     agent: str,
     output: str,
@@ -242,6 +274,18 @@ def update_top_index(task_name: str, status: str) -> None:
         if task.get("dir") == task_name:
             task["status"] = status
             task[f"{status}_at"] = stamp()
+            break
+    write_json(path, index)
+
+
+def update_top_index_fields(task_name: str, **fields: object) -> None:
+    path = WORKROOM_DIR / "phases/index.json"
+    if not path.exists():
+        return
+    index = read_json(path)
+    for task in index.get("tasks", []):
+        if task.get("dir") == task_name:
+            task.update(fields)
             break
     write_json(path, index)
 
@@ -292,6 +336,89 @@ def phase_status(index_path: Path, phase_id: str) -> str:
         if phase.get("id") == phase_id:
             return str(phase.get("status", "pending"))
     return "missing"
+
+
+def phase_by_id(index_path: Path, phase_id: str) -> dict | None:
+    index = read_json(index_path)
+    for phase in index.get("phases", []):
+        if phase.get("id") == phase_id:
+            return phase
+    return None
+
+
+def normalize_items(items: object) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    normalized: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def append_unique_items(existing: object, additions: list[str]) -> list[str]:
+    items = normalize_items(existing)
+    for addition in additions:
+        text = addition.strip()
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def blocked_reason(phase: dict | None) -> str:
+    if not isinstance(phase, dict):
+        return ""
+    return str(phase.get("blocked_reason", "")).strip()
+
+
+def is_deferable_blocked_reason(reason: str) -> bool:
+    lowered = reason.lower()
+    if not lowered:
+        return False
+    user_decision_needles = (
+        "choose",
+        "decide",
+        "product decision",
+        "scope decision",
+        "which option",
+        "clarify requirement",
+        "dependency",
+        "package",
+    )
+    if any(needle in lowered for needle in user_decision_needles):
+        return False
+    return any(needle in lowered for needle in DEFERABLE_BLOCKED_NEEDLES)
+
+
+def convert_deferable_blocked_phase(index_path: Path, phase_id: str) -> bool:
+    index = read_json(index_path)
+    for item in index.get("phases", []):
+        if item.get("id") != phase_id:
+            continue
+        reason = blocked_reason(item)
+        if not is_deferable_blocked_reason(reason):
+            return False
+        item["status"] = "running"
+        item["deferred_requirements"] = append_unique_items(item.get("deferred_requirements"), [reason])
+        item["last_deferred_at"] = stamp()
+        item.pop("blocked_reason", None)
+        item.pop("blocked_at", None)
+        write_json(index_path, index)
+        print(f"Deferred non-blocking requirement for {phase_id}: {reason}")
+        return True
+    return False
+
+
+def collect_deferred_requirements(index: dict) -> list[str]:
+    deferred: list[str] = []
+    for phase in index.get("phases", []):
+        phase_id = str(phase.get("id", "phase"))
+        for item in normalize_items(phase.get("deferred_requirements")):
+            entry = f"{phase_id}: {item}"
+            if entry not in deferred:
+                deferred.append(entry)
+    return deferred
 
 
 def extract_phase_summary(output: str, fallback: str) -> str:
@@ -390,6 +517,7 @@ def phase_prompt(
     phase_file: Path,
     previous_summaries: list[str],
     previous_failure: str,
+    previous_deferred: str,
 ) -> str:
     summaries = "\n".join(f"- {item}" for item in previous_summaries) or "- None"
     phase_ref = phase_file.relative_to(ROOT)
@@ -419,6 +547,8 @@ Complete only the phase below.
 
 {previous_failure}
 
+{previous_deferred}
+
 ## Required Output
 
 After implementation, update `.workroom/phases/{task_name}/index.json` for this phase only if blocked or unrecoverable:
@@ -428,6 +558,7 @@ After implementation, update `.workroom/phases/{task_name}/index.json` for this 
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
 Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Implement the phase, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
+If an API key, secret, account connection, deployment setting, or manual check is required only after implementation, add it to this phase's `"deferred_requirements"` list in `.workroom/phases/{task_name}/index.json` instead of blocking.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -450,6 +581,7 @@ def fix_prompt(
     previous_summaries: list[str],
     feedback: str,
     change_snapshot: str,
+    previous_deferred: str,
 ) -> str:
     summaries = "\n".join(f"- {item}" for item in previous_summaries) or "- None"
     context_ref = context_path.relative_to(ROOT)
@@ -468,6 +600,8 @@ Make the smallest reasonable change that resolves the feedback. Do not expand sc
 ## Previous Phase Summaries
 
 {summaries}
+
+{previous_deferred}
 
 ## Current Phase
 
@@ -497,6 +631,7 @@ After fixing, update `.workroom/phases/{task_name}/index.json` for this phase on
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
 Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Fix what you can from the concrete feedback, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
+If an API key, secret, account connection, deployment setting, or manual check is required only after implementation, add it to this phase's `"deferred_requirements"` list in `.workroom/phases/{task_name}/index.json` instead of blocking.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -656,7 +791,7 @@ def main() -> int:
 
         print("# Dry run: no files were written and no agent was called.")
         print()
-        print(phase_prompt(None, task_name, phase_file, previous_summaries, previous_failure_section(phase)))
+        print(phase_prompt(None, task_name, phase_file, previous_summaries, previous_failure_section(phase), previous_deferred_section(phase)))
         return 0
 
     index.setdefault("started_at", stamp())
@@ -685,7 +820,14 @@ def main() -> int:
             return 1
 
         context_path = write_context_snapshot(task_dir)
-        prompt = phase_prompt(context_path, task_name, phase_file, previous_summaries, previous_failure_section(phase))
+        prompt = phase_prompt(
+            context_path,
+            task_name,
+            phase_file,
+            previous_summaries,
+            previous_failure_section(phase),
+            previous_deferred_section(phase),
+        )
         if args.dry_run:
             print(prompt)
             return 0
@@ -707,7 +849,15 @@ def main() -> int:
                 log=str(log_path.relative_to(ROOT)),
             )
             active_prompt = (
-                fix_prompt(context_path, task_name, phase_file, previous_summaries, feedback, current_change_snapshot())
+                fix_prompt(
+                    context_path,
+                    task_name,
+                    phase_file,
+                    previous_summaries,
+                    feedback,
+                    current_change_snapshot(),
+                    previous_deferred_section(phase_by_id(index_path, phase["id"]) or phase),
+                )
                 if feedback
                 else prompt
             )
@@ -716,8 +866,9 @@ def main() -> int:
             if code == 0:
                 current_status = phase_status(index_path, phase["id"])
                 if current_status == "blocked":
-                    update_top_index(task_name, "blocked")
-                    return 1
+                    if not convert_deferable_blocked_phase(index_path, phase["id"]):
+                        update_top_index(task_name, "blocked")
+                        return 1
                 if current_status == "error":
                     update_top_index(task_name, "error")
                     return 1
@@ -806,8 +957,12 @@ def main() -> int:
             index = read_json(index_path)
             current = next(item for item in index["phases"] if item["id"] == phase["id"])
             if current.get("status") == "blocked":
-                update_top_index(task_name, "blocked")
-                return 1
+                if convert_deferable_blocked_phase(index_path, phase["id"]):
+                    index = read_json(index_path)
+                    current = next(item for item in index["phases"] if item["id"] == phase["id"])
+                else:
+                    update_top_index(task_name, "blocked")
+                    return 1
             if current.get("status") == "error":
                 update_top_index(task_name, "error")
                 return 1
@@ -856,11 +1011,27 @@ def main() -> int:
             return retryable_pause_exit_code(args.strict_exit_codes)
 
     index = read_json(index_path)
+    deferred = collect_deferred_requirements(index)
     index["status"] = "completed"
     index["completed_at"] = stamp()
+    if deferred:
+        index["deferred_requirements"] = deferred
+    else:
+        index.pop("deferred_requirements", None)
     write_json(index_path, index)
-    update_top_index(task_name, "completed")
-    print(f"Completed .workroom/phases/{task_name}")
+    if deferred:
+        update_top_index_fields(
+            task_name,
+            status="completed_with_deferred_requirements",
+            completed_with_deferred_requirements_at=stamp(),
+            deferred_requirements=deferred,
+        )
+        print(f"Completed .workroom/phases/{task_name} with deferred requirements")
+        for item in deferred:
+            print(f"- {item}")
+    else:
+        update_top_index(task_name, "completed")
+        print(f"Completed .workroom/phases/{task_name}")
     return 0
 
 

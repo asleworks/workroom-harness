@@ -59,6 +59,7 @@ The script is the harness engine. It is responsible for:
 - repeating until approval, no-progress stall, or the safety budget
 - updating phase status in `.workroom/phases/{task-name}/index.json`
 - preserving each completed phase summary for the next worker and reviewer
+- collecting deferred requirements so externally provided values or manual checks are reported after implementation instead of blocking mid-run
 
 Codex uses `codex exec`. Claude Code uses `claude -p` with `--permission-mode bypassPermissions` by default so non-interactive worker runs do not stop waiting for command approval. Override with `WORKROOM_CLAUDE_PERMISSION_MODE` if a project needs a stricter mode.
 
@@ -68,6 +69,7 @@ Runner safeguards:
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
 - Routine verification or review failures are treated as internal fix-loop feedback. The default CLI output stays concise and points to logs; use `--verbose` to print full failure output on each attempt.
 - Workers must not mark a phase blocked only because local verification, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. They should implement what they can, summarize skipped local checks, and let the harness verification/review loop decide.
+- API keys, secrets, account connections, deployment settings, and manual checks that are needed only after implementation should be recorded as `deferred_requirements`, not `blocked`.
 - `WORKROOM_PHASE_MAX_ATTEMPTS` controls the per-phase safety budget. Default: `50`.
 - `WORKROOM_PHASE_MAX_RETRIES` is kept as a backward-compatible alias when `WORKROOM_PHASE_MAX_ATTEMPTS` is not set.
 - `WORKROOM_PHASE_STALL_LIMIT` controls how many consecutive attempts may repeat the same failure and repository state before the harness pauses. Default: `5`.
@@ -104,6 +106,8 @@ If the worker explicitly determines that user action is required or the phase is
 1. mark the phase as `blocked` or `error`
 2. write the concrete reason in `index.json`
 3. stop before starting the next phase
+
+If the user action is only needed after implementation, such as filling an API key to test real external traffic, do not stop mid-run. Record it as `deferred_requirements`. The harness can complete the task with `completed_with_deferred_requirements` and print the remaining actions at the end.
 
 If the agent runner itself fails before verification or review can complete:
 

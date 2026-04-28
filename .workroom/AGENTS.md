@@ -156,6 +156,7 @@ Each stage has a review gate:
 When working inside `.workroom/phases/{task-name}/`, update `index.json`:
 
 - `completed`: phase finished, verification passed, and reviewer approved
+- `completed_with_deferred_requirements`: task finished, with user-provided values or manual checks remaining after implementation
 - `running`: harness has started a worker run
 - `reviewing`: harness has started a read-only reviewer run
 - `retrying`: harness will rerun the worker with verification or review feedback
@@ -165,6 +166,8 @@ When working inside `.workroom/phases/{task-name}/`, update `index.json`:
 Only the harness should mark a phase as `completed`. Worker agents may mark `error` or `blocked` when they cannot continue because of a real user/external dependency.
 
 Do not mark a phase `blocked` only because verification commands, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside a worker session. Those are harness verification/review concerns, not user blockers. Implement the phase, note skipped local checks in the phase summary, and let the harness continue.
+
+If an API key, secret, account connection, deployment setting, or manual check is needed only after implementation, record it in `deferred_requirements` instead of blocking. The harness should finish the implementation and report deferred requirements at the end.
 
 Every completed phase should include a short `summary` that the next worker and reviewer can read.
 

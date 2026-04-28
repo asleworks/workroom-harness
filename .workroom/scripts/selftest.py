@@ -17,8 +17,10 @@ import run_phases
 from agent_runner import ignore_read_only_copy_items, normalize_structured_output, parse_review_result
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
+    collect_deferred_requirements,
     current_change_fingerprint,
     fix_prompt,
+    is_deferable_blocked_reason,
     phase_prompt,
     previous_failure_section,
     progress_signature,
@@ -107,6 +109,7 @@ def test_harness_feedback_contract() -> None:
         [],
         feedback,
         "## git diff --stat\nhandler.ts | 2 +-",
+        "",
     )
     assert "Current Repository Change Snapshot" in prompt
     assert "Fix Requirements" in prompt
@@ -114,6 +117,7 @@ def test_harness_feedback_contract() -> None:
     assert "Do not mark repeated verification or review failure as" in prompt
     assert "Do not mark this phase" in prompt
     assert "dev-server commands" in prompt
+    assert "deferred_requirements" in prompt
     assert 'unrecoverable repeated failure: `"status": "error"`' not in prompt
 
 
@@ -124,18 +128,42 @@ def test_phase_prompt_status_contract() -> None:
         run_phases.ROOT / ".workroom/templates/phase.template.md",
         [],
         "",
+        "",
     )
 
     assert 'user action needed: `"status": "blocked"`' in prompt
     assert 'truly unrecoverable implementation problem: `"status": "error"`' in prompt
     assert "Do not mark repeated verification or review failure as" in prompt
     assert "dev-server commands" in prompt
+    assert "deferred_requirements" in prompt
     assert 'repeated failure: `"status": "error"`' not in prompt
 
 
 def test_claude_worker_permission_mode_default() -> None:
     if "WORKROOM_CLAUDE_PERMISSION_MODE" not in os.environ:
         assert agent_runner.CLAUDE_PERMISSION_MODE == "bypassPermissions"
+
+
+def test_deferable_blocked_reasons() -> None:
+    assert is_deferable_blocked_reason("YOUTUBE_API_KEY is required to verify real API calls")
+    assert is_deferable_blocked_reason("local verification and dev-server manual UI checks require command approval")
+    assert not is_deferable_blocked_reason("Need user to decide which pricing model to implement")
+    assert not is_deferable_blocked_reason("Need user approval before adding a new dependency package")
+
+
+def test_deferred_requirements_are_collected() -> None:
+    deferred = collect_deferred_requirements(
+        {
+            "phases": [
+                {"id": "phase-01", "deferred_requirements": ["Set YOUTUBE_API_KEY in .env.local"]},
+                {"id": "phase-02", "deferred_requirements": ["Run production smoke check"]},
+            ]
+        }
+    )
+    assert deferred == [
+        "phase-01: Set YOUTUBE_API_KEY in .env.local",
+        "phase-02: Run production smoke check",
+    ]
 
 
 def test_retry_output_is_concise_by_default() -> None:
@@ -193,6 +221,8 @@ def main() -> int:
         test_harness_feedback_contract,
         test_phase_prompt_status_contract,
         test_claude_worker_permission_mode_default,
+        test_deferable_blocked_reasons,
+        test_deferred_requirements_are_collected,
         test_retry_output_is_concise_by_default,
         test_progress_tracking_contract,
         test_untracked_file_changes_count_as_progress,
