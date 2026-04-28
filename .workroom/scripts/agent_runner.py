@@ -107,6 +107,30 @@ def parse_review_result(output: str) -> dict | None:
     return data
 
 
+def normalize_structured_output(output: str) -> str:
+    try:
+        envelope = json.loads(output)
+    except Exception:
+        return output
+
+    if not isinstance(envelope, dict):
+        return output
+
+    structured_output = envelope.get("structured_output")
+    if isinstance(structured_output, dict):
+        return json.dumps(structured_output, ensure_ascii=False)
+
+    result = envelope.get("result")
+    if isinstance(result, str) and result.strip():
+        try:
+            json.loads(result)
+            return result
+        except Exception:
+            return output
+
+    return output
+
+
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
@@ -269,13 +293,7 @@ def run_claude_agent(
         code, output = run_streaming(command, log_path, input_text=prompt, cwd=root)
 
     if output_schema is not None and code == 0:
-        try:
-            envelope = json.loads(output)
-            structured_output = envelope.get("structured_output")
-            if structured_output is not None:
-                return code, json.dumps(structured_output, ensure_ascii=False)
-        except Exception:
-            pass
+        return code, normalize_structured_output(output)
     return code, output
 
 
