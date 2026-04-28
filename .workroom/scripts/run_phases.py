@@ -267,7 +267,7 @@ After implementation, update `.workroom/phases/{task_name}/index.json` for this 
 - repeated failure: `"status": "error"` and `"error_message"`
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
 
-Do not mark the phase completed. The harness will do that only after verification and review approval.
+Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
 End your final response with one concise line:
 
@@ -321,7 +321,7 @@ After fixing, update `.workroom/phases/{task_name}/index.json` for this phase on
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
 - unrecoverable repeated failure: `"status": "error"` and `"error_message"`
 
-Do not mark the phase completed. The harness will do that only after verification and review approval.
+Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
 End your final response with one concise line:
 
@@ -349,6 +349,8 @@ Review the completed phase in read-only mode. Do not edit files.
 You must decide whether this phase can be approved before the harness starts the next phase.
 
 Inspect the current repository diff, changed files, verification output, phase acceptance criteria, and Workroom docs before deciding.
+
+Harness-owned phase index fields are not worker deliverables. Do not request changes only because the current phase lacks `"status": "completed"`, `"completed_at"`, or `"summary"` in `.workroom/phases/{task_name}/index.json`; those fields are written by the harness only after reviewer approval.
 
 ## Required Reads
 

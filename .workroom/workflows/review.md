@@ -72,6 +72,8 @@ Check:
 8. maintainability
 9. security-sensitive changes
 
+Harness-owned phase index fields are not implementation deliverables. In implementation review, do not request changes only because the current phase lacks `status: completed`, `completed_at`, or `summary`; the harness writes those after approval.
+
 ## Output Format
 
 Return only a JSON object matching `.workroom/schemas/review-result.schema.json`.

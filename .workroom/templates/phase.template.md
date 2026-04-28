@@ -37,7 +37,7 @@ Describe the outcome this phase must produce.
 
 ## Status Update
 
-Do not mark this phase as completed manually. The harness marks completion only after verification and review approval.
+Do not mark this phase as completed manually. Do not write `completed_at` or `summary`. The harness marks completion and writes the summary only after verification and review approval.
 
 If the phase cannot continue, update `index.json` with either:
 

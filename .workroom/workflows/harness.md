@@ -76,7 +76,7 @@ A phase is complete only when all are true:
 - worker implementation finished
 - `.workroom/scripts/verify.sh` passed
 - reviewer returned structured JSON with `"decision": "APPROVED"`
-- phase status was updated to `completed`
+- harness updated the phase with `status`, `completed_at`, and `summary`
 
 ## Failure Handling
 
@@ -98,4 +98,5 @@ If the agent runner itself fails before verification or review can complete:
 - Do not skip review.
 - Do not start the next phase before the current phase is approved.
 - Do not mark a phase complete if verification fails.
+- Worker and reviewer agents must not require or write `status: completed`, `completed_at`, or `summary`; those fields are harness-owned and are written only after approval.
 - Do not weaken tests, types, or verification commands to pass the harness.
