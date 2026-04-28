@@ -24,9 +24,9 @@ REQUIRED_FILES = [
     ".workroom/scripts/verify.sh",
     ".workroom/scripts/validate_docs.py",
     ".workroom/scripts/scaffold_phases.py",
+    ".workroom/scripts/review_artifacts.py",
     ".workroom/scripts/validate_phases.py",
     ".workroom/scripts/install-codex.sh",
-    ".workroom/scripts/install-claude.sh",
     ".workroom/scripts/install.py",
     ".workroom/scripts/run_phases.py",
     ".workroom/templates/phase-index.template.json",
@@ -90,19 +90,13 @@ def check_docs() -> bool:
 
 def check_agents() -> bool:
     codex = subprocess.run(["which", "codex"], text=True, capture_output=True)
-    claude = subprocess.run(["which", "claude"], text=True, capture_output=True)
 
     if codex.returncode == 0:
         print(f"OK    codex CLI: {codex.stdout.strip()}")
     else:
         print("INFO  codex CLI not found")
 
-    if claude.returncode == 0:
-        print(f"OK    claude CLI: {claude.stdout.strip()}")
-    else:
-        print("INFO  claude CLI not found")
-
-    return codex.returncode == 0 or claude.returncode == 0
+    return codex.returncode == 0
 
 
 def check_skill_set(name: str, paths: list[str]) -> bool:
@@ -128,15 +122,7 @@ def check_skills() -> bool:
             ".agents/skills/workroom-harness/SKILL.md",
         ],
     )
-    claude_ok = check_skill_set(
-        "claude",
-        [
-            ".claude/skills/workroom-phase/SKILL.md",
-            ".claude/skills/workroom-plan/SKILL.md",
-            ".claude/skills/workroom-harness/SKILL.md",
-        ],
-    )
-    return codex_ok or claude_ok
+    return codex_ok
 
 
 def main() -> int:
@@ -157,7 +143,7 @@ def main() -> int:
         return 0
 
     if files_ok and skills_ok and json_ok and verify_ok and docs_ok:
-        print("Workroom Harness docs and files are ready. Install Codex or Claude CLI to run phases automatically.")
+        print("Workroom Harness docs and files are ready. Install Codex CLI to run phases automatically.")
         return 0
 
     if files_ok and skills_ok and json_ok and verify_ok:

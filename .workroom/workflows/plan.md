@@ -82,7 +82,13 @@ The docs must capture:
 
 ## 4. Docs Review Gate
 
-Review the docs using `.workroom/workflows/review.md` in `docs` mode.
+Run a fresh read-only review agent:
+
+```bash
+python3 .workroom/scripts/review_artifacts.py docs --agent auto
+```
+
+The review agent uses `.workroom/workflows/review.md` in `docs` mode.
 
 Check:
 
@@ -94,7 +100,9 @@ Check:
 - AGENTS rules match the project docs
 - unresolved questions are explicit
 
-If review returns `REVIEW_DECISION: CHANGES_REQUESTED`, improve the docs and review again.
+If review returns `REVIEW_DECISION: CHANGES_REQUESTED`, improve the docs and run the review agent again.
+
+Do not continue to validation until the fresh review agent returns `REVIEW_DECISION: APPROVED`.
 
 ## 5. Validate
 
@@ -110,6 +118,6 @@ Fix validation failures before finishing.
 
 Stop when:
 
-- docs review returns `REVIEW_DECISION: APPROVED`
+- fresh docs review agent returns `REVIEW_DECISION: APPROVED`
 - `python3 .workroom/scripts/validate_docs.py` passes
 - no implementation or phase files were created

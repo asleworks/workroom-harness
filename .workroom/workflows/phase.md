@@ -81,9 +81,13 @@ Fix validation failures before running `workroom-harness`.
 
 ## 4. Phase Review Gate
 
-Review the generated phase plan using `.workroom/workflows/review.md` in `phases` mode.
+Run a fresh read-only review agent:
 
-Run this as a separate review pass. If the current coding tool supports a separate reviewer agent or fresh headless run, use it. If not, finish writing the phase files first, then perform a distinct read-only review pass before editing the phase files again.
+```bash
+python3 .workroom/scripts/review_artifacts.py phases {task-name} --agent auto
+```
+
+The review agent uses `.workroom/workflows/review.md` in `phases` mode.
 
 Check:
 
@@ -98,9 +102,11 @@ Check:
 - no phase contains vague manual judgment as its only completion condition
 - no placeholder text remains
 
-If review returns `REVIEW_DECISION: CHANGES_REQUESTED`, improve the phase files and review again.
+If review returns `REVIEW_DECISION: CHANGES_REQUESTED`, improve the phase files and run the review agent again.
 
-After the phase review is approved, run validation again:
+Do not continue to harness execution until the fresh review agent returns `REVIEW_DECISION: APPROVED`.
+
+After the fresh phase-plan review agent approves, run validation again:
 
 ```bash
 python3 .workroom/scripts/validate_phases.py {task-name}

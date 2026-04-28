@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+
+import argparse
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+
+WORKROOM_DIR = Path(__file__).resolve().parent.parent
+ROOT = WORKROOM_DIR.parent
+APPROVED = "REVIEW_DECISION: APPROVED"
+CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
+CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
+READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
+    ".DS_Store",
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "coverage",
+    "dist",
+    "node_modules",
+    "*.log",
+)
+
+
+def stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def run(
+    command: list[str],
+    log_path: Path | None = None,
+    input_text: str | None = None,
+    cwd: Path = ROOT,
+) -> tuple[int, str]:
+    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, input=input_text)
+    output = result.stdout + result.stderr
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(output, encoding="utf-8")
+    return result.returncode, output
+
+
+def resolve_agent(agent: str) -> str:
+    if agent != "auto":
+        return agent
+    if shutil.which("codex"):
+        return "codex"
+    if shutil.which("claude"):
+        return "claude"
+    return "none"
+
+
+def check_agent(agent: str) -> bool:
+    if agent == "codex":
+        return shutil.which("codex") is not None
+    if agent == "claude":
+        return shutil.which("claude") is not None
+    return False
+
+
+def run_reviewer(agent: str, prompt: str, log_path: Path) -> tuple[int, str]:
+    if agent == "codex":
+        return run(
+            [
+                "codex",
+                "--ask-for-approval",
+                "never",
+                "exec",
+                "--cd",
+                str(ROOT),
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "-",
+            ],
+            log_path,
+            input_text=prompt,
+        )
+
+    if agent == "claude":
+        with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
+            review_root = Path(tmp_dir) / ROOT.name
+            shutil.copytree(ROOT, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
+            return run(["claude", "-p", prompt], log_path, cwd=review_root)
+
+    return 1, f"Unsupported agent: {agent}"
+
+
+def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
+    if agent == "codex" and CODEX_SESSION_ACCESS_ERROR in output:
+        return True
+    return False
+
+
+def docs_prompt() -> str:
+    return """You are the Workroom Harness docs review agent.
+
+Review the Workroom project docs in read-only mode. Do not edit files.
+
+## Required Reads
+
+- `.workroom/AGENTS.md`
+- `.workroom/docs/PRD.md`
+- `.workroom/docs/ARCHITECTURE.md`
+- `.workroom/docs/ADR.md`
+- `.workroom/docs/TEST_STRATEGY.md`
+- `.workroom/workflows/review.md`
+
+## Review Mode
+
+Use `.workroom/workflows/review.md` in docs mode.
+
+## Required Review Output
+
+Your output must contain exactly one of these decision lines:
+
+- `REVIEW_DECISION: APPROVED`
+- `REVIEW_DECISION: CHANGES_REQUESTED`
+
+Use `REVIEW_DECISION: APPROVED` only if there are no blocking issues and the docs are ready for phase planning.
+Use `REVIEW_DECISION: CHANGES_REQUESTED` if the planning agent must change anything before phase planning.
+"""
+
+
+def phases_prompt(task_name: str) -> str:
+    task_dir = WORKROOM_DIR / "phases" / task_name
+    return f"""You are the Workroom Harness phase-plan review agent.
+
+Review the generated phase plan in read-only mode. Do not edit files.
+
+## Required Reads
+
+- `.workroom/AGENTS.md`
+- all files in `.workroom/docs/`
+- `.workroom/workflows/review.md`
+- `.workroom/phases/index.json`
+- `.workroom/phases/{task_name}/index.json`
+- every `.workroom/phases/{task_name}/phase-*.md`
+
+## Review Mode
+
+Use `.workroom/workflows/review.md` in phases mode.
+
+## Task Directory
+
+`{task_dir.relative_to(ROOT)}`
+
+## Required Review Output
+
+Your output must contain exactly one of these decision lines:
+
+- `REVIEW_DECISION: APPROVED`
+- `REVIEW_DECISION: CHANGES_REQUESTED`
+
+Use `REVIEW_DECISION: APPROVED` only if there are no blocking issues and the phase plan is executable by fresh worker agents.
+Use `REVIEW_DECISION: CHANGES_REQUESTED` if the planning agent must change any phase file or phase index before harness execution.
+"""
+
+
+def decision_code(output: str) -> int:
+    approved = APPROVED in output
+    changes = CHANGES_REQUESTED in output
+    if approved and not changes:
+        return 0
+    if changes and not approved:
+        return 2
+    return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run a fresh read-only Workroom review agent.")
+    parser.add_argument("mode", choices=["docs", "phases"], help="Artifact type to review")
+    parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases for phases mode")
+    parser.add_argument(
+        "--agent",
+        choices=["auto", "codex", "claude"],
+        default="auto",
+        help="Reviewer agent to use. auto prefers Codex when available.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Print the reviewer prompt without calling an agent")
+    args = parser.parse_args()
+
+    if args.mode == "phases" and not args.task:
+        print("ERROR: phases mode requires a task name, for example:")
+        print("python3 .workroom/scripts/review_artifacts.py phases task-name")
+        return 1
+
+    if args.mode == "phases":
+        task_name = args.task.strip().strip("/")
+        task_dir = WORKROOM_DIR / "phases" / task_name
+        if not args.dry_run and not task_dir.is_dir():
+            print(f"ERROR: phase task directory not found: {task_dir.relative_to(ROOT)}")
+            return 1
+        prompt = phases_prompt(task_name)
+        log_name = f"phases-{task_name}.{stamp()}.log"
+    else:
+        prompt = docs_prompt()
+        log_name = f"docs.{stamp()}.log"
+
+    if args.dry_run:
+        print("# Dry run: no agent was called.")
+        print()
+        print(prompt)
+        return 0
+
+    agent = resolve_agent(args.agent)
+    if not check_agent(agent):
+        print("ERROR: No supported reviewer CLI found. Install Codex or Claude, or use --dry-run.")
+        return 1
+
+    log_path = WORKROOM_DIR / "reviews" / log_name
+    code, output = run_reviewer(agent, prompt, log_path)
+    if code != 0:
+        print(output)
+        if is_agent_infrastructure_failure(agent, output):
+            print(f"\nReviewer runner failed before review could run. Fix the runner permission issue and rerun. Log: {log_path.relative_to(ROOT)}")
+            return 1
+        print(f"\nReview agent failed. Log: {log_path.relative_to(ROOT)}")
+        return 1
+
+    print(output)
+    print(f"\nReview log: {log_path.relative_to(ROOT)}")
+    decision = decision_code(output)
+    if decision == 0:
+        return 0
+    if decision == 2:
+        return 2
+
+    print("\nERROR: Review output must contain exactly one valid REVIEW_DECISION line.")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

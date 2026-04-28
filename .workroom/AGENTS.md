@@ -1,6 +1,6 @@
 # .workroom/AGENTS.md
 
-This is the common operating guide for AI coding agents such as Codex and Claude.
+This is the common operating guide for Codex coding agents.
 
 The defaults below are intentionally conservative. They work for most software projects. Customize the project profile, stack, architecture boundaries, and verification commands for your repository.
 
@@ -123,32 +123,28 @@ To execute phase files:
 
 ```bash
 python3 .workroom/scripts/run_phases.py --agent codex
-python3 .workroom/scripts/run_phases.py --agent claude
 ```
 
 If multiple planned or running tasks exist, pass the task name explicitly:
 
 ```bash
 python3 .workroom/scripts/run_phases.py task-name --agent codex
-python3 .workroom/scripts/run_phases.py task-name --agent claude
 ```
 
 Preferred skill entrypoints:
 
-- Codex: `$workroom-plan`, then `$workroom-phase`, then `$workroom-harness`
-- Claude: `/workroom-plan`, then `/workroom-phase`, then `/workroom-harness`
+- `$workroom-plan`, then `$workroom-phase`, then `$workroom-harness`
+
+Plan and phase review gates use fresh read-only review agents through `.workroom/scripts/review_artifacts.py`.
 
 Harness execution uses fresh headless agent runs through `.workroom/scripts/run_phases.py`:
 
 - Codex runner: `codex exec`
-- Claude runner: `claude -p`
-
-The workflow is the same for both tools. Only the runner command differs.
 
 Each stage has a review gate:
 
-- `workroom-plan`: docs review and `.workroom/scripts/validate_docs.py`
-- `workroom-phase`: phase review and `.workroom/scripts/validate_phases.py`
+- `workroom-plan`: fresh docs review agent and `.workroom/scripts/validate_docs.py`
+- `workroom-phase`: fresh phase-plan review agent and `.workroom/scripts/validate_phases.py`
 - `workroom-harness`: implementation review inside `.workroom/scripts/run_phases.py`
 
 ## Phase Status Rules

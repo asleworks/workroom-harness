@@ -32,14 +32,26 @@ def copy_file(src: Path, dst: Path, overwrite: bool, dry_run: bool) -> str:
     return "overwrite" if existed else "write"
 
 
-def copy_tree_files(src_dir: Path, dst_dir: Path, overwrite: bool, dry_run: bool) -> list[tuple[str, Path]]:
+def copy_tree_files(
+    src_dir: Path,
+    dst_dir: Path,
+    overwrite: bool,
+    dry_run: bool,
+    excludes: set[str] | None = None,
+) -> list[tuple[str, Path]]:
+    excludes = excludes or set()
     results = []
     for src in src_dir.rglob("*"):
         if src.is_dir():
             continue
-        if "__pycache__" in src.parts or src.suffix in {".pyc", ".log"} or src.name in {".DS_Store", "context.md"}:
-            continue
         rel = src.relative_to(src_dir)
+        if (
+            rel.as_posix() in excludes
+            or "__pycache__" in src.parts
+            or src.suffix in {".pyc", ".log"}
+            or src.name in {".DS_Store", "context.md"}
+        ):
+            continue
         dst = dst_dir / rel
         action = copy_file(src, dst, overwrite, dry_run)
         results.append((action, dst))
@@ -53,6 +65,7 @@ def install_gitignore(target: Path, dry_run: bool) -> list[tuple[str, Path]]:
 {GITIGNORE_MARKER}
 .workroom/phases/**/*.log
 .workroom/phases/**/context.md
+.workroom/reviews/*.log
 """
 
     if not path.exists():
@@ -77,7 +90,7 @@ def main() -> int:
     parser.add_argument(
         "--agent",
         choices=["codex", "claude", "both"],
-        default="both",
+        default="codex",
         help="Which agent skill directories to install",
     )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing harness files")
@@ -100,6 +113,10 @@ def main() -> int:
     results: list[tuple[str, Path]] = []
     results.extend(install_gitignore(target, args.dry_run))
 
+    core_excludes = set()
+    if args.agent == "codex":
+        core_excludes.add("scripts/install-claude.sh")
+
     for dirname in CORE_DIRS:
         results.extend(
             copy_tree_files(
@@ -107,6 +124,7 @@ def main() -> int:
                 target / dirname,
                 args.overwrite,
                 args.dry_run,
+                core_excludes,
             )
         )
 
@@ -126,9 +144,9 @@ def main() -> int:
     print()
     print("Next steps:")
     print("1. Run python3 .workroom/scripts/doctor.py from the target project.")
-    print("2. Run /workroom-plan in Claude or $workroom-plan in Codex to fill docs.")
+    print("2. Run $workroom-plan in Codex to fill docs.")
     print("3. Edit .workroom/scripts/verify.sh so it runs your real checks.")
-    print("4. Use /workroom-phase and /workroom-harness in Claude, or $workroom-phase and $workroom-harness in Codex.")
+    print("4. Use $workroom-phase and $workroom-harness in Codex.")
     return 0
 
 

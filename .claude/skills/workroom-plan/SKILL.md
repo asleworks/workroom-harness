@@ -14,8 +14,8 @@ Required behavior:
 3. Inspect the repository enough to avoid asking questions the code already answers.
 4. Interview the user using the intake rules in `.workroom/workflows/plan.md`.
 5. Fill or improve `.workroom/AGENTS.md` and `.workroom/docs/`.
-6. Review the docs using `.workroom/workflows/review.md` in docs mode.
-7. Improve the docs until the docs review is approved.
+6. Run `python3 .workroom/scripts/review_artifacts.py docs --agent claude`.
+7. Improve the docs and rerun the fresh review agent until it returns `REVIEW_DECISION: APPROVED`.
 8. Run `python3 .workroom/scripts/validate_docs.py`.
 9. Do not create phase files.
 10. Do not implement product code.

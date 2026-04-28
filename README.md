@@ -1,6 +1,6 @@
 # Workroom Harness
 
-An AI coding-agent harness for Codex and Claude Code.
+An AI coding-agent harness for Codex.
 
 All Workroom-owned files are installed under `.workroom/` so the harness does not collide with an existing project's `docs/`, `scripts/`, or `AGENTS.md`.
 
@@ -14,7 +14,6 @@ All Workroom-owned files are installed under `.workroom/` so the harness does no
 └── templates/
 
 .agents/skills/   Codex skills
-.claude/skills/   Claude Code skills
 ```
 
 ## Install
@@ -23,12 +22,6 @@ Codex:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash
-```
-
-Claude Code:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-claude.sh | bash
 ```
 
 You can override the repository through an environment variable when testing a fork:
@@ -56,18 +49,14 @@ $workroom-phase
 $workroom-harness
 ```
 
-Claude Code:
-
-```text
-/workroom-plan
-/workroom-phase
-/workroom-harness
-```
-
 The flow is:
 
 ```text
-fill docs -> create phases -> run phases through worker/verify/reviewer/fix loops
+fill docs
+-> fresh docs reviewer
+-> create phases
+-> fresh phase-plan reviewer
+-> run phases through worker/verify/reviewer/fix loops
 ```
 
-Codex uses `codex exec`. Claude Code uses `claude -p`. The workflow files and phase files are shared.
+Codex uses `codex exec`.

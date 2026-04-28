@@ -19,6 +19,7 @@ ROOT = WORKROOM_DIR.parent
 MAX_RETRIES = 3
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
+CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
 READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
     ".DS_Store",
     ".pytest_cache",
@@ -127,6 +128,22 @@ def run_agent(agent: str, prompt: str, log_path: Path, read_only: bool = False) 
         return run(["claude", "-p", prompt], log_path)
 
     return 1, f"Unsupported agent: {agent}"
+
+
+def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
+    if agent == "codex" and CODEX_SESSION_ACCESS_ERROR in output:
+        return True
+    return False
+
+
+def abort_agent_infrastructure_failure(agent: str, output: str, log_path: Path) -> int:
+    print(f"ERROR: {agent} runner failed before the phase could run.")
+    print("The harness is leaving the phase runnable. Fix the runner permission issue and rerun workroom-harness.")
+    print(f"Log: {log_path.relative_to(ROOT)}")
+    if output.strip():
+        print()
+        print(output.strip())
+    return 1
 
 
 def update_top_index(task_name: str, status: str) -> None:
@@ -475,6 +492,8 @@ def main() -> int:
                         read_only=True,
                     )
                     if review_code != 0:
+                        if is_agent_infrastructure_failure(agent, review_output):
+                            return abort_agent_infrastructure_failure(agent, review_output, review_log_path)
                         feedback = "Review agent failed to run.\n\n" + review_output
                         print(feedback)
                     elif review_approved(review_output):
@@ -497,6 +516,8 @@ def main() -> int:
                     feedback = "Verification failed.\n\n" + verify_output
                     print(verify_output)
             else:
+                if is_agent_infrastructure_failure(agent, worker_output):
+                    return abort_agent_infrastructure_failure(agent, worker_output, log_path)
                 feedback = "Worker agent failed.\n\n" + worker_output
 
             index = read_json(index_path)
