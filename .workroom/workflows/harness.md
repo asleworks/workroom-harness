@@ -85,7 +85,8 @@ If verification or review fails repeatedly without the worker explicitly marking
 1. keep the logs in the phase directory
 2. leave the phase `pending`
 3. record `last_failed_at`, `last_failure_reason`, and `last_failure_attempts`
-4. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
+4. include the previous failure in the next worker prompt when the harness is rerun
+5. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
 
 If the worker explicitly determines that user action is required or the phase is unrecoverable:
 

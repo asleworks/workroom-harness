@@ -93,6 +93,8 @@ def summarize_phase_failure(feedback: str) -> str:
         "Review requested changes.",
         "Worker agent failed.",
         "Review agent failed to run.",
+        "Key failure lines:",
+        "Full verification output:",
     }
     for line in feedback.splitlines():
         stripped = line.strip()
@@ -102,10 +104,74 @@ def summarize_phase_failure(feedback: str) -> str:
             continue
         if stripped in generic_headers:
             continue
+        if stripped.startswith("Before doing any other work,"):
+            continue
         if stripped.endswith(":"):
             continue
         return stripped[:500]
     return "Phase did not receive verification and review approval."
+
+
+def extract_failure_lines(output: str, limit: int = 20) -> str:
+    needles = (
+        "error ",
+        "error:",
+        "failed",
+        "failure",
+        "exception",
+        "traceback",
+        "eslint",
+    )
+    lines: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == "Verification failed.":
+            continue
+        lowered = stripped.lower()
+        if any(needle in lowered for needle in needles):
+            lines.append(stripped)
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
+def verification_feedback(verify_output: str) -> str:
+    key_lines = extract_failure_lines(verify_output)
+    parts = [
+        "Verification failed.",
+        "",
+        "Before doing any other work, fix the verification errors below and rerun the same checks mentally against the changed files.",
+    ]
+    if key_lines:
+        parts.extend(["", "Key failure lines:", key_lines])
+    parts.extend(["", "Full verification output:", verify_output])
+    return "\n".join(parts).strip()
+
+
+def previous_failure_section(phase: dict) -> str:
+    reason = str(phase.get("last_failure_reason", "")).strip()
+    runner_error = str(phase.get("last_runner_error", "")).strip()
+    if not reason and not runner_error:
+        return ""
+
+    lines = [
+        "## Previous Failed Harness Attempt",
+        "",
+        "This phase was attempted before and did not pass. Address this first before expanding scope.",
+    ]
+    if reason:
+        lines.append(f"- Last failure reason: {reason}")
+    if phase.get("last_failed_at"):
+        lines.append(f"- Last failed at: {phase['last_failed_at']}")
+    if phase.get("last_failure_attempts"):
+        lines.append(f"- Attempts in last run: {phase['last_failure_attempts']}")
+    if runner_error:
+        lines.append(f"- Last runner error: {runner_error}")
+    if phase.get("last_runner_log"):
+        lines.append(f"- Last runner log: {phase['last_runner_log']}")
+    return "\n".join(lines)
 
 
 def abort_agent_infrastructure_failure(
@@ -254,6 +320,7 @@ def phase_prompt(
     task_name: str,
     phase_file: Path,
     previous_summaries: list[str],
+    previous_failure: str,
 ) -> str:
     summaries = "\n".join(f"- {item}" for item in previous_summaries) or "- None"
     phase_ref = phase_file.relative_to(ROOT)
@@ -280,6 +347,8 @@ Complete only the phase below.
 ## Previous Phase Summaries
 
 {summaries}
+
+{previous_failure}
 
 ## Required Output
 
@@ -486,7 +555,7 @@ def main() -> int:
 
         print("# Dry run: no files were written and no agent was called.")
         print()
-        print(phase_prompt(None, task_name, phase_file, previous_summaries))
+        print(phase_prompt(None, task_name, phase_file, previous_summaries, previous_failure_section(phase)))
         return 0
 
     index.setdefault("started_at", stamp())
@@ -515,7 +584,7 @@ def main() -> int:
             return 1
 
         context_path = write_context_snapshot(task_dir)
-        prompt = phase_prompt(context_path, task_name, phase_file, previous_summaries)
+        prompt = phase_prompt(context_path, task_name, phase_file, previous_summaries, previous_failure_section(phase))
         if args.dry_run:
             print(prompt)
             return 0
@@ -595,6 +664,15 @@ def main() -> int:
                                     item["status"] = "completed"
                                     item["completed_at"] = stamp()
                                     item["summary"] = extract_phase_summary(worker_output, f"{phase['title']} completed")
+                                    for key in [
+                                        "last_failed_at",
+                                        "last_failure_reason",
+                                        "last_failure_attempts",
+                                        "last_runner_failed_at",
+                                        "last_runner_error",
+                                        "last_runner_log",
+                                    ]:
+                                        item.pop(key, None)
                                     previous_summaries.append(f"{phase['id']}: {item['summary']}")
                                     break
                             write_json(index_path, index)
@@ -603,7 +681,7 @@ def main() -> int:
                         feedback = review_feedback(review_result)
                         print(feedback)
                 else:
-                    feedback = "Verification failed.\n\n" + verify_output
+                    feedback = verification_feedback(verify_output)
                     print(verify_output)
             else:
                 if is_agent_infrastructure_failure(agent, worker_output):
