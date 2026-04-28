@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
+import codecs
 import json
+import os
 import select
 import shutil
 import subprocess
@@ -19,8 +21,8 @@ from validate_phases import validate_task, validate_top_index
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 MAX_RETRIES = 3
-AGENT_IDLE_TIMEOUT_SECONDS = 900
-AGENT_TOTAL_TIMEOUT_SECONDS = 3600
+AGENT_IDLE_TIMEOUT_SECONDS = int(os.environ.get("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", "0"))
+AGENT_TOTAL_TIMEOUT_SECONDS = int(os.environ.get("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", "7200"))
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
 CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
@@ -95,34 +97,49 @@ def run_streaming(
     idle_timeout_seconds: int = AGENT_IDLE_TIMEOUT_SECONDS,
     total_timeout_seconds: int = AGENT_TOTAL_TIMEOUT_SECONDS,
 ) -> tuple[int, str]:
+    def kill_process(process: subprocess.Popen[bytes]) -> None:
+        process.kill()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
     started_at = time.monotonic()
     last_output_at = started_at
     output_parts: list[str] = []
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_file = tempfile.TemporaryFile("w+b") if input_text is not None else None
 
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ {' '.join(command)}\n")
         log.write(f"started_at: {stamp()}\n\n")
+        log.write(f"idle_timeout_seconds: {idle_timeout_seconds or 'disabled'}\n")
+        log.write(f"total_timeout_seconds: {total_timeout_seconds}\n\n")
+        if input_text is not None and prompt_file is not None:
+            encoded_input = input_text.encode("utf-8")
+            prompt_file.write(encoded_input)
+            prompt_file.seek(0)
+            log.write(f"stdin_bytes: {len(encoded_input)}\n\n")
         log.flush()
 
         process = subprocess.Popen(
             command,
             cwd=cwd,
-            text=True,
-            stdin=subprocess.PIPE,
+            stdin=prompt_file,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            bufsize=1,
         )
-        if input_text is not None and process.stdin is not None:
-            process.stdin.write(input_text)
-            process.stdin.close()
+        if prompt_file is not None:
+            prompt_file.close()
+            prompt_file = None
 
         assert process.stdout is not None
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while True:
             now = time.monotonic()
             if process.poll() is not None:
-                remainder = process.stdout.read()
+                remainder_bytes = process.stdout.read()
+                remainder = decoder.decode(remainder_bytes or b"", final=True)
                 if remainder:
                     output_parts.append(remainder)
                     log.write(remainder)
@@ -134,27 +151,28 @@ def run_streaming(
                 output_parts.append(message)
                 log.write(message)
                 log.flush()
-                process.kill()
+                kill_process(process)
                 return 124, "".join(output_parts)
 
-            if now - last_output_at > idle_timeout_seconds:
+            if idle_timeout_seconds > 0 and now - last_output_at > idle_timeout_seconds:
                 message = f"\nERROR: agent runner produced no output for {idle_timeout_seconds} seconds.\n"
                 output_parts.append(message)
                 log.write(message)
                 log.flush()
-                process.kill()
+                kill_process(process)
                 return 124, "".join(output_parts)
 
             readable, _, _ = select.select([process.stdout], [], [], 1)
             if not readable:
                 continue
 
-            line = process.stdout.readline()
-            if not line:
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
                 continue
+            text = decoder.decode(chunk)
             last_output_at = time.monotonic()
-            output_parts.append(line)
-            log.write(line)
+            output_parts.append(text)
+            log.write(text)
             log.flush()
 
         return process.returncode or 0, "".join(output_parts)
