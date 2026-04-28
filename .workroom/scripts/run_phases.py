@@ -500,6 +500,10 @@ def phase_can_start(phase: dict) -> tuple[bool, str]:
     return False, f"Phase {phase_id} has invalid status {status!r}."
 
 
+def retryable_pause_exit_code(strict_exit_codes: bool) -> int:
+    return 1 if strict_exit_codes else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Workroom Harness phases with an AI coding agent.")
     parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases/. If omitted, auto-select one planned task.")
@@ -508,6 +512,11 @@ def main() -> int:
         choices=["auto", "codex", "claude"],
         default="auto",
         help="Agent runner to use. auto prefers Codex, then Claude.",
+    )
+    parser.add_argument(
+        "--strict-exit-codes",
+        action="store_true",
+        help="Return exit code 1 when a retryable phase pauses after failed attempts. By default, retryable pauses exit 0.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the first prompt without calling an agent")
     args = parser.parse_args()
@@ -714,7 +723,7 @@ def main() -> int:
             update_top_index(task_name, "running")
             print(f"Phase {phase['id']} did not receive verification and review approval after {MAX_RETRIES} attempts.")
             print("The phase has been left pending so the harness can be rerun after fixes or prompt updates.")
-            return 1
+            return retryable_pause_exit_code(args.strict_exit_codes)
 
     index = read_json(index_path)
     index["status"] = "completed"

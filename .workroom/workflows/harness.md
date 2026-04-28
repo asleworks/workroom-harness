@@ -88,6 +88,8 @@ If verification or review fails repeatedly without the worker explicitly marking
 4. include the previous failure in the next worker prompt when the harness is rerun
 5. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
 
+This retryable pause is not a CLI error by default. The script exits `0` so agent shells do not treat normal harness pauses as command failures. Use `--strict-exit-codes` only in CI or external automation that needs a non-zero exit for incomplete runs.
+
 If the worker explicitly determines that user action is required or the phase is unrecoverable:
 
 1. mark the phase as `blocked` or `error`

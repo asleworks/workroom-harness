@@ -25,4 +25,4 @@ claude -p worker
 -> next phase
 ```
 
-Stop and report if a phase becomes `error` or `blocked`.
+Stop and report if a phase becomes `error` or `blocked`, or if the harness pauses with a phase left `pending` and a `last_failure_reason`.
