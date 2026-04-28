@@ -106,5 +106,7 @@ Changes requested example:
 
 - Use `"decision": "APPROVED"` only when the reviewed artifact satisfies the relevant mode criteria.
 - Use `"decision": "CHANGES_REQUESTED"` when docs, phase files, code, tests, or behavior must change before approval.
+- When using `"decision": "CHANGES_REQUESTED"`, include at least one concrete item in `blocking_issues`, `missing_tests`, `architecture_violations`, or `recommended_fixes`.
+- When using `"decision": "APPROVED"`, leave `blocking_issues`, `missing_tests`, `architecture_violations`, and `recommended_fixes` empty.
 - Keep review findings concrete enough for a worker agent to fix without asking for interpretation.
 - Do not edit files during review. Review is read-only.

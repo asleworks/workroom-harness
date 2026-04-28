@@ -94,6 +94,16 @@ def parse_review_result(output: str) -> dict | None:
         value = data.get(key)
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             return None
+    actionable_items = [
+        item.strip()
+        for key in REVIEW_RESULT_ARRAY_KEYS
+        for item in data[key]
+        if item.strip()
+    ]
+    if data["decision"] == "CHANGES_REQUESTED" and not actionable_items:
+        return None
+    if data["decision"] == "APPROVED" and actionable_items:
+        return None
     return data
 
 
