@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.workroom/phases/**/*.log
+.workroom/phases/**/context.md
+__pycache__/
+*.pyc

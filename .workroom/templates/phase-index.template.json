@@ -1,0 +1,13 @@
+{
+  "task": "task-name",
+  "status": "planned",
+  "phases": [
+    {
+      "id": "phase-01",
+      "title": "Describe the first phase",
+      "file": "phase-01.md",
+      "status": "pending"
+    }
+  ]
+}
+

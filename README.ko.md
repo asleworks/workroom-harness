@@ -1,0 +1,160 @@
+# Workroom Harness
+
+Codex와 Claude Code에서 함께 쓸 수 있는 AI 코딩 에이전트 실행 하네스입니다.
+
+하네스가 소유하는 파일은 모두 `.workroom/` 안에 설치됩니다. 기존 프로젝트의 `docs/`, `scripts/`, `AGENTS.md`와 충돌하지 않게 하기 위해서입니다.
+
+```text
+.workroom/
+├── AGENTS.md        Workroom 전용 에이전트 규칙
+├── docs/            PRD, 아키텍처, ADR, 테스트 전략
+├── workflows/       plan, phase, harness, review, fix 워크플로우
+├── scripts/         설치, 검증, phase 실행 스크립트
+├── phases/          생성되는 phase 계획과 실행 상태
+└── templates/       phase 템플릿
+
+.agents/skills/      Codex용 skill
+.claude/skills/      Claude Code용 skill
+```
+
+## 설치
+
+Codex용:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash
+```
+
+Claude Code용:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-claude.sh | bash
+```
+
+포크나 테스트 레포를 설치할 때는 환경변수로 대상 저장소를 바꿀 수 있습니다.
+
+```bash
+WORKROOM_HARNESS_REPO=your-account/workroom-harness \
+  curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash
+```
+
+설치 전 미리보기:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash -s -- --dry-run
+```
+
+설치 후 확인:
+
+```bash
+python3 .workroom/scripts/doctor.py
+```
+
+처음 설치한 직후에는 `doctor.py`가 하네스는 설치됐지만 프로젝트 문서는 아직 준비되지 않았다고 경고할 수 있습니다. `$workroom-plan`을 실행하기 전이라면 정상입니다.
+
+## 사용법
+
+사용자가 알면 되는 명령은 세 개입니다.
+
+### 1. 문서 채우기
+
+Codex:
+
+```text
+$workroom-plan
+```
+
+Claude Code:
+
+```text
+/workroom-plan
+```
+
+아이디어를 말하면 에이전트가 질문을 하면서 `.workroom/AGENTS.md`와 `.workroom/docs/`를 채웁니다. 마지막에는 docs review와 `python3 .workroom/scripts/validate_docs.py`를 통과해야 끝납니다.
+
+### 2. Phase 설계
+
+Codex:
+
+```text
+$workroom-phase
+```
+
+Claude Code:
+
+```text
+/workroom-phase
+```
+
+채워진 문서를 기반으로 `.workroom/phases/{task-name}/` 아래에 phase 계획을 만듭니다. 구현은 하지 않습니다. 마지막에는 phase review와 `python3 .workroom/scripts/validate_phases.py {task-name}`를 통과해야 끝납니다.
+
+### 3. 하네스 실행
+
+Codex:
+
+```text
+$workroom-harness
+```
+
+Claude Code:
+
+```text
+/workroom-harness
+```
+
+만들어진 phase를 처음부터 끝까지 실행합니다.
+
+```text
+fresh worker run
+-> verify.sh
+-> fresh reviewer run
+-> fix
+-> reviewer approval
+-> next phase
+```
+
+Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 `claude -p`를 씁니다. 워크플로우와 파일 구조는 같습니다.
+
+## 직접 수정할 파일
+
+처음 설치 후 주로 바꾸는 파일은 이 정도입니다.
+
+```text
+.workroom/AGENTS.md
+.workroom/docs/PRD.md
+.workroom/docs/ARCHITECTURE.md
+.workroom/docs/ADR.md
+.workroom/docs/TEST_STRATEGY.md
+.workroom/scripts/verify.sh
+```
+
+`verify.sh`에는 실제 프로젝트의 검증 명령을 넣습니다.
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+## 로컬 설치
+
+레포를 직접 받아둔 상태라면:
+
+```bash
+python3 /path/to/workroom-harness/.workroom/scripts/install.py /path/to/your-project --agent codex
+python3 /path/to/workroom-harness/.workroom/scripts/install.py /path/to/your-project --agent claude
+```
+
+## 원칙
+
+프로젝트 지식, 실행 상태, 스크립트는 `.workroom/` 안에 둡니다.
+
+도구별 차이는 skill 위치와 실행 runner뿐입니다.
+
+```text
+Codex skill:  .agents/skills/
+Claude skill: .claude/skills/
+Codex runner: codex exec
+Claude runner: claude -p
+```
