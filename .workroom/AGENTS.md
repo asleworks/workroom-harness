@@ -152,6 +152,9 @@ Each stage has a review gate:
 When working inside `.workroom/phases/{task-name}/`, update `index.json`:
 
 - `completed`: phase finished, verification passed, and reviewer approved
+- `running`: harness has started a worker run
+- `reviewing`: harness has started a read-only reviewer run
+- `retrying`: harness will rerun the worker with verification or review feedback
 - `error`: phase failed after repeated attempts
 - `blocked`: user action or external setup is required
 

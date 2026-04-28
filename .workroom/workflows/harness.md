@@ -55,6 +55,13 @@ The script is the harness engine. It is responsible for:
 
 Codex uses `codex exec`.
 
+Runner safeguards:
+
+- Agent output is streamed into the phase log while the process is running.
+- Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
+- `WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS` controls the wall-clock runner timeout. Default: `7200`.
+- `WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS` is disabled by default. Set it only when a project explicitly wants no-output watchdog behavior.
+
 ## Phase Completion Rule
 
 A phase is complete only when all are true:
@@ -72,6 +79,12 @@ If verification or review fails repeatedly:
 2. mark the phase as `error` or `blocked`
 3. write the concrete reason in `index.json`
 4. stop before starting the next phase
+
+If the agent runner itself fails before verification or review can complete:
+
+1. leave the phase runnable
+2. record `last_runner_error` and `last_runner_log`
+3. stop so the operator can fix the runner environment and retry
 
 ## Prohibited
 

@@ -5,6 +5,7 @@ import codecs
 import json
 import os
 import select
+import signal
 import shutil
 import subprocess
 import sys
@@ -21,8 +22,6 @@ from validate_phases import validate_task, validate_top_index
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 MAX_RETRIES = 3
-AGENT_IDLE_TIMEOUT_SECONDS = int(os.environ.get("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", "0"))
-AGENT_TOTAL_TIMEOUT_SECONDS = int(os.environ.get("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", "7200"))
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
 CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
@@ -39,6 +38,20 @@ READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
     "node_modules",
     "*.log",
 )
+
+
+def int_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return default
+
+
+AGENT_IDLE_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", 0)
+AGENT_TOTAL_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", 7200)
 
 
 def stamp() -> str:
@@ -98,11 +111,22 @@ def run_streaming(
     total_timeout_seconds: int = AGENT_TOTAL_TIMEOUT_SECONDS,
 ) -> tuple[int, str]:
     def kill_process(process: subprocess.Popen[bytes]) -> None:
-        process.kill()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except OSError:
+            process.terminate()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+            except OSError:
+                process.kill()
+            process.wait(timeout=5)
 
     started_at = time.monotonic()
     last_output_at = started_at
@@ -128,6 +152,7 @@ def run_streaming(
             stdin=prompt_file,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         if prompt_file is not None:
             prompt_file.close()
@@ -146,7 +171,7 @@ def run_streaming(
                     log.flush()
                 break
 
-            if now - started_at > total_timeout_seconds:
+            if total_timeout_seconds > 0 and now - started_at > total_timeout_seconds:
                 message = f"\nERROR: agent runner exceeded total timeout of {total_timeout_seconds} seconds.\n"
                 output_parts.append(message)
                 log.write(message)
@@ -235,7 +260,29 @@ def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
     return False
 
 
-def abort_agent_infrastructure_failure(agent: str, output: str, log_path: Path) -> int:
+def summarize_runner_error(output: str) -> str:
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ERROR:") or "Fatal error:" in stripped:
+            return stripped
+    return "Agent runner failed before the phase could be approved."
+
+
+def abort_agent_infrastructure_failure(
+    agent: str,
+    output: str,
+    log_path: Path,
+    index_path: Path,
+    phase_id: str,
+) -> int:
+    set_phase_status(
+        index_path,
+        phase_id,
+        "pending",
+        last_runner_failed_at=stamp(),
+        last_runner_error=summarize_runner_error(output),
+        last_runner_log=str(log_path.relative_to(ROOT)),
+    )
     print(f"ERROR: {agent} runner failed before the phase could run.")
     print("The harness is leaving the phase runnable. Fix the runner permission issue and rerun workroom-harness.")
     print(f"Log: {log_path.relative_to(ROOT)}")
@@ -617,7 +664,7 @@ def main() -> int:
                     )
                     if review_code != 0:
                         if is_agent_infrastructure_failure(agent, review_output):
-                            return abort_agent_infrastructure_failure(agent, review_output, review_log_path)
+                            return abort_agent_infrastructure_failure(agent, review_output, review_log_path, index_path, phase["id"])
                         feedback = "Review agent failed to run.\n\n" + review_output
                         print(feedback)
                     elif review_approved(review_output):
@@ -641,7 +688,7 @@ def main() -> int:
                     print(verify_output)
             else:
                 if is_agent_infrastructure_failure(agent, worker_output):
-                    return abort_agent_infrastructure_failure(agent, worker_output, log_path)
+                    return abort_agent_infrastructure_failure(agent, worker_output, log_path, index_path, phase["id"])
                 feedback = "Worker agent failed.\n\n" + worker_output
 
             index = read_json(index_path)
