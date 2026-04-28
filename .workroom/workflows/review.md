@@ -46,6 +46,7 @@ Check:
 8. no placeholder content remains
 9. blocked external requirements are explicit
 10. no phase implements out-of-scope PRD items
+11. manual UI/dev-server checks are not the only blocking completion condition unless the user explicitly requested manual approval
 
 ### Implementation Review
 
@@ -73,6 +74,8 @@ Check:
 9. security-sensitive changes
 
 Harness-owned phase index fields are not implementation deliverables. In implementation review, do not request changes only because the current phase lacks `status: completed`, `completed_at`, or `summary`; the harness writes those after approval.
+
+Do not require a worker to mark a phase blocked because local verification, dev-server commands, browser checks, or manual UI checks could not run inside the worker session. Treat skipped local checks as review context. Request concrete code/test fixes when needed, or approve when the phase satisfies acceptance criteria and harness verification passed.
 
 ## Output Format
 

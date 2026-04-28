@@ -162,7 +162,9 @@ When working inside `.workroom/phases/{task-name}/`, update `index.json`:
 - `error`: worker explicitly determined that the phase is unrecoverable
 - `blocked`: user action or external setup is required
 
-Only the harness should mark a phase as `completed`. Worker agents may mark `error` or `blocked` when they cannot continue.
+Only the harness should mark a phase as `completed`. Worker agents may mark `error` or `blocked` when they cannot continue because of a real user/external dependency.
+
+Do not mark a phase `blocked` only because verification commands, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside a worker session. Those are harness verification/review concerns, not user blockers. Implement the phase, note skipped local checks in the phase summary, and let the harness continue.
 
 Every completed phase should include a short `summary` that the next worker and reviewer can read.
 

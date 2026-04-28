@@ -44,6 +44,7 @@ def int_env(name: str, default: int) -> int:
 
 AGENT_IDLE_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", 0)
 AGENT_TOTAL_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", 7200)
+CLAUDE_PERMISSION_MODE = os.environ.get("WORKROOM_CLAUDE_PERMISSION_MODE", "bypassPermissions").strip()
 REVIEW_RESULT_KEYS = {
     "decision",
     "summary",
@@ -291,6 +292,8 @@ def run_claude_agent(
     output_schema: Path | None = None,
 ) -> tuple[int, str]:
     command = ["claude", "-p"]
+    if CLAUDE_PERMISSION_MODE:
+        command.extend(["--permission-mode", CLAUDE_PERMISSION_MODE])
     if output_schema is not None:
         command.extend([
             "--output-format",

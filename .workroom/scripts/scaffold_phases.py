@@ -70,6 +70,7 @@ When this phase cannot continue, update `.workroom/phases/{task_dir.name}/index.
 - truly unrecoverable implementation problem: set this phase to `"status": "error"` and add `"error_message"`
 
 Do not mark this phase as completed yourself. Do not write `completed_at` or `summary`. The harness marks completion and writes the summary only after verification and review approval.
+Do not mark this phase as blocked only because verification commands, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. Implement the phase, note skipped local checks in `PHASE_SUMMARY`, and let the harness run verification and review.
 """,
         encoding="utf-8",
     )

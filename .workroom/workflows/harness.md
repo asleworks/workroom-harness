@@ -60,13 +60,14 @@ The script is the harness engine. It is responsible for:
 - updating phase status in `.workroom/phases/{task-name}/index.json`
 - preserving each completed phase summary for the next worker and reviewer
 
-Codex uses `codex exec`. Claude Code uses `claude -p`.
+Codex uses `codex exec`. Claude Code uses `claude -p` with `--permission-mode bypassPermissions` by default so non-interactive worker runs do not stop waiting for command approval. Override with `WORKROOM_CLAUDE_PERMISSION_MODE` if a project needs a stricter mode.
 
 Runner safeguards:
 
 - Agent output is streamed into the phase log while the process is running.
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
 - Routine verification or review failures are treated as internal fix-loop feedback. The default CLI output stays concise and points to logs; use `--verbose` to print full failure output on each attempt.
+- Workers must not mark a phase blocked only because local verification, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. They should implement what they can, summarize skipped local checks, and let the harness verification/review loop decide.
 - `WORKROOM_PHASE_MAX_ATTEMPTS` controls the per-phase safety budget. Default: `50`.
 - `WORKROOM_PHASE_MAX_RETRIES` is kept as a backward-compatible alias when `WORKROOM_PHASE_MAX_ATTEMPTS` is not set.
 - `WORKROOM_PHASE_STALL_LIMIT` controls how many consecutive attempts may repeat the same failure and repository state before the harness pauses. Default: `5`.

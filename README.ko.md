@@ -127,7 +127,7 @@ fresh worker run
 -> next phase
 ```
 
-Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 `claude -p`를 씁니다.
+Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 기본적으로 `claude -p --permission-mode bypassPermissions`를 씁니다. non-interactive worker가 명령 승인 대기 때문에 멈추지 않게 하기 위해서입니다. 더 엄격한 모드가 필요하면 `WORKROOM_CLAUDE_PERMISSION_MODE`로 바꿀 수 있습니다.
 
 검증이나 리뷰가 실패하면 하네스는 실패 내용을 작업자에게 다시 전달하고, 실패 내용이나 repository diff가 바뀌는 동안은 계속 시도합니다. 같은 실패와 같은 repository 상태가 반복되어 진전이 없거나 phase별 safety budget을 다 쓴 경우에만 멈춥니다. 이때 phase는 `pending` 상태와 `last_failure_reason`, `last_failure_log`를 남기며, 이 retry 가능한 pause는 기본적으로 CLI 에러로 처리하지 않습니다. 외부 자동화에서 non-zero exit이 필요할 때만 `--strict-exit-codes`를 씁니다.
 

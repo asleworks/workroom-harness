@@ -45,3 +45,5 @@ If the phase cannot continue, update `index.json` with either:
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
+
+Do not mark this phase as `"blocked"` only because verification commands, dev-server commands, browser checks, or manual UI checks need approval or cannot run inside the worker session. Implement the phase, note skipped local checks in `PHASE_SUMMARY`, and let the harness run verification and review.

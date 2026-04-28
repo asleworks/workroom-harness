@@ -88,7 +88,7 @@ fill docs
 -> run phases through worker/verify/reviewer/fix loops
 ```
 
-Codex uses `codex exec`. Claude Code uses `claude -p`.
+Codex uses `codex exec`. Claude Code uses `claude -p` with `--permission-mode bypassPermissions` by default so non-interactive workers do not stop waiting for command approval. Set `WORKROOM_CLAUDE_PERMISSION_MODE` to override this.
 
 If verification or review fails, the harness feeds the failure back to the worker and keeps trying while the failure or repository diff is changing. It pauses only when attempts stall on the same failure and same repository state, or when the per-phase safety budget is exhausted. The phase is left `pending` with `last_failure_reason` and `last_failure_log`; this retryable pause is not a CLI error unless `--strict-exit-codes` is used.
 

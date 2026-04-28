@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import agent_runner
 import run_phases
 from agent_runner import ignore_read_only_copy_items, normalize_structured_output, parse_review_result
 from review_artifacts import decision_code, review_exit_code
@@ -110,6 +112,8 @@ def test_harness_feedback_contract() -> None:
     assert "Fix Requirements" in prompt
     assert "handler.ts" in prompt
     assert "Do not mark repeated verification or review failure as" in prompt
+    assert "Do not mark this phase" in prompt
+    assert "dev-server commands" in prompt
     assert 'unrecoverable repeated failure: `"status": "error"`' not in prompt
 
 
@@ -125,7 +129,13 @@ def test_phase_prompt_status_contract() -> None:
     assert 'user action needed: `"status": "blocked"`' in prompt
     assert 'truly unrecoverable implementation problem: `"status": "error"`' in prompt
     assert "Do not mark repeated verification or review failure as" in prompt
+    assert "dev-server commands" in prompt
     assert 'repeated failure: `"status": "error"`' not in prompt
+
+
+def test_claude_worker_permission_mode_default() -> None:
+    if "WORKROOM_CLAUDE_PERMISSION_MODE" not in os.environ:
+        assert agent_runner.CLAUDE_PERMISSION_MODE == "bypassPermissions"
 
 
 def test_retry_output_is_concise_by_default() -> None:
@@ -182,6 +192,7 @@ def main() -> int:
         test_read_only_copy_ignore,
         test_harness_feedback_contract,
         test_phase_prompt_status_contract,
+        test_claude_worker_permission_mode_default,
         test_retry_output_is_concise_by_default,
         test_progress_tracking_contract,
         test_untracked_file_changes_count_as_progress,

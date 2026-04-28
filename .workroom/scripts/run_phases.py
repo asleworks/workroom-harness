@@ -427,6 +427,7 @@ After implementation, update `.workroom/phases/{task_name}/index.json` for this 
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
+Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Implement the phase, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -495,6 +496,7 @@ After fixing, update `.workroom/phases/{task_name}/index.json` for this phase on
 - truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
 
 Do not mark repeated verification or review failure as `"error"`. The harness owns progress tracking and will keep fixing while attempts are making progress.
+Do not mark this phase `"blocked"` because local verification, dev-server commands, browser checks, or manual UI checks need command approval or cannot run inside the worker session. Fix what you can from the concrete feedback, report any checks you could not run in `PHASE_SUMMARY`, and let the harness run verification and review.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
