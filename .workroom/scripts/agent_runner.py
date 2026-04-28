@@ -235,22 +235,6 @@ def run_codex_agent(
     return code, transcript
 
 
-def with_json_schema_prompt(prompt: str, output_schema: Path | None) -> str:
-    if output_schema is None:
-        return prompt
-    schema = output_schema.read_text(encoding="utf-8")
-    return f"""{prompt}
-
-## Structured Output Contract
-
-Return only a JSON object that validates against this JSON Schema. Do not wrap it in Markdown.
-
-```json
-{schema}
-```
-"""
-
-
 def run_claude_agent(
     root: Path,
     prompt: str,
@@ -258,14 +242,31 @@ def run_claude_agent(
     read_only: bool = False,
     output_schema: Path | None = None,
 ) -> tuple[int, str]:
-    prompt = with_json_schema_prompt(prompt, output_schema)
     command = ["claude", "-p"]
+    if output_schema is not None:
+        command.extend([
+            "--output-format",
+            "json",
+            "--json-schema",
+            output_schema.read_text(encoding="utf-8"),
+        ])
     if read_only:
         with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
             review_root = Path(tmp_dir) / root.name
             shutil.copytree(root, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
-            return run_streaming(command, log_path, input_text=prompt, cwd=review_root)
-    return run_streaming(command, log_path, input_text=prompt, cwd=root)
+            code, output = run_streaming(command, log_path, input_text=prompt, cwd=review_root)
+    else:
+        code, output = run_streaming(command, log_path, input_text=prompt, cwd=root)
+
+    if output_schema is not None and code == 0:
+        try:
+            envelope = json.loads(output)
+            structured_output = envelope.get("structured_output")
+            if structured_output is not None:
+                return code, json.dumps(structured_output, ensure_ascii=False)
+        except Exception:
+            pass
+    return code, output
 
 
 def run_agent(
