@@ -66,6 +66,7 @@ Runner safeguards:
 
 - Agent output is streamed into the phase log while the process is running.
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
+- `WORKROOM_PHASE_MAX_RETRIES` controls worker/fix attempts per phase. Default: `5`.
 - `WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS` controls the wall-clock runner timeout. Default: `7200`.
 - `WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS` is disabled by default. Set it only when a project explicitly wants no-output watchdog behavior.
 
@@ -83,10 +84,12 @@ A phase is complete only when all are true:
 If verification or review fails repeatedly without the worker explicitly marking the phase blocked or unrecoverable:
 
 1. keep the logs in the phase directory
-2. leave the phase `pending`
-3. record `last_failed_at`, `last_failure_reason`, and `last_failure_attempts`
-4. include the previous failure in the next worker prompt when the harness is rerun
-5. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
+2. feed the concrete verification/review failure and current repository diff back to the next fix worker
+3. record `last_failed_at` and `last_failure_reason` after each failed attempt
+4. after the retry limit, leave the phase `pending`
+5. record `last_failure_attempts`
+6. include the previous failure in the next worker prompt when the harness is rerun
+7. stop before starting the next phase so the harness can be rerun after fixes or prompt updates
 
 This retryable pause is not a CLI error by default. The script exits `0` so agent shells do not treat normal harness pauses as command failures. Use `--strict-exit-codes` only in CI or external automation that needs a non-zero exit for incomplete runs.
 

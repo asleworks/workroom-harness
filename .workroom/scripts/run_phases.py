@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -16,9 +17,21 @@ from validate_phases import validate_task, validate_top_index
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 REVIEW_SCHEMA = WORKROOM_DIR / "schemas/review-result.schema.json"
-MAX_RETRIES = 3
 RUNNABLE_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying"}
 STOP_PHASE_STATUSES = {"blocked", "error"}
+
+
+def int_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return default
+
+
+MAX_RETRIES = int_env("WORKROOM_PHASE_MAX_RETRIES", 5)
 
 
 def stamp() -> str:
@@ -377,6 +390,7 @@ def fix_prompt(
     phase_file: Path,
     previous_summaries: list[str],
     feedback: str,
+    change_snapshot: str,
 ) -> str:
     summaries = "\n".join(f"- {item}" for item in previous_summaries) or "- None"
     context_ref = context_path.relative_to(ROOT)
@@ -403,6 +417,17 @@ Make the smallest reasonable change that resolves the feedback. Do not expand sc
 ## Feedback To Fix
 
 {feedback}
+
+## Current Repository Change Snapshot
+
+{change_snapshot}
+
+## Fix Requirements
+
+- If feedback names a file, line, symbol, type, route, command, or test, inspect and fix that concrete target first.
+- For verification failures, fix the first compiler/test/lint error before changing unrelated code.
+- Do not weaken `.workroom/scripts/verify.sh`, tests, lint, or type checks to pass.
+- Do not expand scope beyond the current phase and the failing verification/review feedback.
 
 ## Required Output
 
@@ -611,7 +636,7 @@ def main() -> int:
                 log=str(log_path.relative_to(ROOT)),
             )
             active_prompt = (
-                fix_prompt(context_path, task_name, phase_file, previous_summaries, feedback)
+                fix_prompt(context_path, task_name, phase_file, previous_summaries, feedback, current_change_snapshot())
                 if feedback
                 else prompt
             )
@@ -709,6 +734,8 @@ def main() -> int:
             retries += 1
             current["retries"] = retries
             current["status"] = "retrying"
+            current["last_failed_at"] = stamp()
+            current["last_failure_reason"] = summarize_phase_failure(feedback)
             write_json(index_path, index)
 
         index = read_json(index_path)
