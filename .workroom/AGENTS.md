@@ -159,12 +159,14 @@ When working inside `.workroom/phases/{task-name}/`, update `index.json`:
 - `running`: harness has started a worker run
 - `reviewing`: harness has started a read-only reviewer run
 - `retrying`: harness will rerun the worker with verification or review feedback
-- `error`: phase failed after repeated attempts
+- `error`: worker explicitly determined that the phase is unrecoverable
 - `blocked`: user action or external setup is required
 
 Only the harness should mark a phase as `completed`. Worker agents may mark `error` or `blocked` when they cannot continue.
 
 Every completed phase should include a short `summary` that the next worker and reviewer can read.
+
+Repeated verification or review failures are retryable harness pauses by default. The harness should leave the phase `pending`, record `last_failure_reason`, and feed that failure back into the next worker prompt instead of locking the phase as `error`.
 
 ## Forbidden Actions
 

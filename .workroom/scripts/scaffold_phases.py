@@ -66,10 +66,10 @@ Describe the outcome this phase must produce.
 
 When this phase cannot continue, update `.workroom/phases/{task_dir.name}/index.json`:
 
-- repeated failure: set this phase to `"status": "error"` and add `"error_message"`
 - user action needed: set this phase to `"status": "blocked"` and add `"blocked_reason"`
+- truly unrecoverable implementation problem: set this phase to `"status": "error"` and add `"error_message"`
 
-Do not mark this phase as completed yourself. The harness marks completion only after verification and review approval.
+Do not mark this phase as completed yourself. Do not write `completed_at` or `summary`. The harness marks completion and writes the summary only after verification and review approval.
 """,
         encoding="utf-8",
     )

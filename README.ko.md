@@ -129,6 +129,8 @@ fresh worker run
 
 Codex는 내부적으로 `codex exec`를 쓰고, Claude Code는 `claude -p`를 씁니다.
 
+phase가 retry 한도 안에 검증이나 리뷰를 통과하지 못하면 하네스는 해당 phase에서 멈추고 `pending` 상태와 `last_failure_reason`을 남깁니다. 다음 phase로 넘어가지는 않지만, 이 retry 가능한 pause는 기본적으로 CLI 에러로 처리하지 않습니다. 외부 자동화에서 non-zero exit이 필요할 때만 `--strict-exit-codes`를 씁니다.
+
 ## 직접 수정할 파일
 
 처음 설치 후 주로 바꾸는 파일은 이 정도입니다.
