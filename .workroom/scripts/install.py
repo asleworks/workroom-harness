@@ -11,8 +11,6 @@ CORE_DIRS = [".workroom"]
 
 SKILL_DIRS = {
     "codex": [".agents"],
-    "claude": [".claude"],
-    "both": [".agents", ".claude"],
 }
 
 GITIGNORE_MARKER = "# workroom-harness"
@@ -109,7 +107,7 @@ def main() -> int:
     parser.add_argument("target", nargs="?", default=".", help="Target project directory")
     parser.add_argument(
         "--agent",
-        choices=["codex", "claude", "both"],
+        choices=["codex"],
         default="codex",
         help="Which agent skill directories to install",
     )
@@ -137,10 +135,6 @@ def main() -> int:
     results: list[tuple[str, Path]] = []
     results.extend(install_gitignore(target, args.dry_run))
 
-    core_excludes = set()
-    if args.agent == "codex":
-        core_excludes.add("scripts/install-claude.sh")
-
     for dirname in CORE_DIRS:
         results.extend(
             copy_tree_files(
@@ -148,7 +142,6 @@ def main() -> int:
                 target / dirname,
                 args.overwrite,
                 args.dry_run,
-                core_excludes,
             )
         )
 

@@ -24,6 +24,7 @@ REQUIRED_FILES = [
     ".workroom/scripts/verify.sh",
     ".workroom/scripts/validate_docs.py",
     ".workroom/scripts/scaffold_phases.py",
+    ".workroom/scripts/agent_runner.py",
     ".workroom/scripts/review_artifacts.py",
     ".workroom/scripts/validate_phases.py",
     ".workroom/scripts/install-codex.sh",

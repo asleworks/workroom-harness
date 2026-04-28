@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse
-import codecs
 import json
-import os
-import select
-import signal
-import shutil
 import subprocess
 import sys
-import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_runner import check_agent, is_agent_infrastructure_failure, resolve_agent, run_codex_agent
 from validate_phases import validate_task, validate_top_index
 
 
@@ -24,34 +18,8 @@ ROOT = WORKROOM_DIR.parent
 MAX_RETRIES = 3
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
-CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
-AGENT_IDLE_TIMEOUT_ERROR = "agent runner produced no output"
-AGENT_TOTAL_TIMEOUT_ERROR = "agent runner exceeded total timeout"
-READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
-    ".DS_Store",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".venv",
-    "__pycache__",
-    "coverage",
-    "dist",
-    "node_modules",
-    "*.log",
-)
-
-
-def int_env(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return default
-    try:
-        return max(0, int(value))
-    except ValueError:
-        return default
-
-
-AGENT_IDLE_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS", 0)
-AGENT_TOTAL_TIMEOUT_SECONDS = int_env("WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS", 7200)
+RUNNABLE_PHASE_STATUSES = {"pending", "running", "reviewing", "retrying"}
+STOP_PHASE_STATUSES = {"blocked", "error"}
 
 
 def stamp() -> str:
@@ -102,162 +70,11 @@ def run(
     return result.returncode, output
 
 
-def run_streaming(
-    command: list[str],
-    log_path: Path,
-    input_text: str | None = None,
-    cwd: Path = ROOT,
-    idle_timeout_seconds: int = AGENT_IDLE_TIMEOUT_SECONDS,
-    total_timeout_seconds: int = AGENT_TOTAL_TIMEOUT_SECONDS,
-) -> tuple[int, str]:
-    def kill_process(process: subprocess.Popen[bytes]) -> None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        except OSError:
-            process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                return
-            except OSError:
-                process.kill()
-            process.wait(timeout=5)
-
-    started_at = time.monotonic()
-    last_output_at = started_at
-    output_parts: list[str] = []
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_file = tempfile.TemporaryFile("w+b") if input_text is not None else None
-
-    with log_path.open("w", encoding="utf-8") as log:
-        log.write(f"$ {' '.join(command)}\n")
-        log.write(f"started_at: {stamp()}\n\n")
-        log.write(f"idle_timeout_seconds: {idle_timeout_seconds or 'disabled'}\n")
-        log.write(f"total_timeout_seconds: {total_timeout_seconds}\n\n")
-        if input_text is not None and prompt_file is not None:
-            encoded_input = input_text.encode("utf-8")
-            prompt_file.write(encoded_input)
-            prompt_file.seek(0)
-            log.write(f"stdin_bytes: {len(encoded_input)}\n\n")
-        log.flush()
-
-        process = subprocess.Popen(
-            command,
-            cwd=cwd,
-            stdin=prompt_file,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        if prompt_file is not None:
-            prompt_file.close()
-            prompt_file = None
-
-        assert process.stdout is not None
-        decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        while True:
-            now = time.monotonic()
-            if process.poll() is not None:
-                remainder_bytes = process.stdout.read()
-                remainder = decoder.decode(remainder_bytes or b"", final=True)
-                if remainder:
-                    output_parts.append(remainder)
-                    log.write(remainder)
-                    log.flush()
-                break
-
-            if total_timeout_seconds > 0 and now - started_at > total_timeout_seconds:
-                message = f"\nERROR: agent runner exceeded total timeout of {total_timeout_seconds} seconds.\n"
-                output_parts.append(message)
-                log.write(message)
-                log.flush()
-                kill_process(process)
-                return 124, "".join(output_parts)
-
-            if idle_timeout_seconds > 0 and now - last_output_at > idle_timeout_seconds:
-                message = f"\nERROR: agent runner produced no output for {idle_timeout_seconds} seconds.\n"
-                output_parts.append(message)
-                log.write(message)
-                log.flush()
-                kill_process(process)
-                return 124, "".join(output_parts)
-
-            readable, _, _ = select.select([process.stdout], [], [], 1)
-            if not readable:
-                continue
-
-            chunk = os.read(process.stdout.fileno(), 4096)
-            if not chunk:
-                continue
-            text = decoder.decode(chunk)
-            last_output_at = time.monotonic()
-            output_parts.append(text)
-            log.write(text)
-            log.flush()
-
-        return process.returncode or 0, "".join(output_parts)
-
-
-def resolve_agent(agent: str) -> str:
-    if agent != "auto":
-        return agent
-    if shutil.which("codex"):
-        return "codex"
-    if shutil.which("claude"):
-        return "claude"
-    return "none"
-
-
-def check_agent(agent: str) -> bool:
-    if agent == "codex":
-        return shutil.which("codex") is not None
-    if agent == "claude":
-        return shutil.which("claude") is not None
-    return False
-
-
 def run_agent(agent: str, prompt: str, log_path: Path, read_only: bool = False) -> tuple[int, str]:
     if agent == "codex":
-        return run_streaming(
-            [
-                "codex",
-                "--ask-for-approval",
-                "never",
-                "exec",
-                "--cd",
-                str(ROOT),
-                "--sandbox",
-                "read-only" if read_only else "workspace-write",
-                "--ephemeral",
-                "-",
-            ],
-            log_path,
-            input_text=prompt,
-        )
-
-    if agent == "claude":
-        if read_only:
-            with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
-                review_root = Path(tmp_dir) / ROOT.name
-                shutil.copytree(ROOT, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
-                return run(["claude", "-p", prompt], log_path, cwd=review_root)
-
-        return run(["claude", "-p", prompt], log_path)
+        return run_codex_agent(ROOT, prompt, log_path, read_only=read_only)
 
     return 1, f"Unsupported agent: {agent}"
-
-
-def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
-    if agent == "codex" and CODEX_SESSION_ACCESS_ERROR in output:
-        return True
-    if AGENT_IDLE_TIMEOUT_ERROR in output or AGENT_TOTAL_TIMEOUT_ERROR in output:
-        return True
-    return False
 
 
 def summarize_runner_error(output: str) -> str:
@@ -541,14 +358,29 @@ def first_runnable_phase(index: dict) -> tuple[dict, list[str]] | tuple[None, li
     return None, previous_summaries
 
 
+def phase_can_start(phase: dict) -> tuple[bool, str]:
+    status = str(phase.get("status", "pending"))
+    phase_id = phase.get("id", "unknown")
+    if status in RUNNABLE_PHASE_STATUSES:
+        return True, ""
+    if status in STOP_PHASE_STATUSES:
+        detail_key = "blocked_reason" if status == "blocked" else "error_message"
+        detail = phase.get(detail_key, "")
+        message = f"Phase {phase_id} is {status}."
+        if detail:
+            message += f" {detail}"
+        return False, message
+    return False, f"Phase {phase_id} has invalid status {status!r}."
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Workroom Harness phases with an AI coding agent.")
     parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases/. If omitted, auto-select one planned task.")
     parser.add_argument(
         "--agent",
-        choices=["auto", "codex", "claude"],
+        choices=["auto", "codex"],
         default="auto",
-        help="Agent runner to use. auto prefers Codex when available.",
+        help="Agent runner to use. auto selects Codex when available.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the first prompt without calling an agent")
     args = parser.parse_args()
@@ -574,7 +406,7 @@ def main() -> int:
     agent = resolve_agent(args.agent)
 
     if not args.dry_run and not check_agent(agent):
-        print("ERROR: No supported agent CLI found. Install Codex or Claude, or use --dry-run.")
+        print("ERROR: No supported agent CLI found. Install Codex, or use --dry-run.")
         return 1
 
     index = read_json(index_path)
@@ -583,6 +415,11 @@ def main() -> int:
         if not phase:
             print(f"No pending phases in .workroom/phases/{task_name}")
             return 0
+
+        can_start, reason = phase_can_start(phase)
+        if not can_start:
+            print(f"ERROR: {reason}")
+            return 1
 
         phase_file = task_dir / phase["file"]
         if not phase_file.exists():
@@ -605,6 +442,13 @@ def main() -> int:
             if phase.get("summary"):
                 previous_summaries.append(f"{phase['id']}: {phase['summary']}")
             continue
+
+        can_start, reason = phase_can_start(phase)
+        if not can_start:
+            print(f"ERROR: {reason}")
+            status = str(phase.get("status", "error"))
+            update_top_index(task_name, status if status in STOP_PHASE_STATUSES else "error")
+            return 1
 
         phase_file = task_dir / phase["file"]
         if not phase_file.exists():

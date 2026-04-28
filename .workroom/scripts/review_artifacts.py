@@ -1,101 +1,30 @@
 #!/usr/bin/env python3
 
 import argparse
-import shutil
-import subprocess
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_runner import check_agent, is_agent_infrastructure_failure, resolve_agent, run_codex_agent
 
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
-CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
-READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
-    ".DS_Store",
-    ".git",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".venv",
-    "__pycache__",
-    "coverage",
-    "dist",
-    "node_modules",
-    "*.log",
-)
 
 
 def stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
-def run(
-    command: list[str],
-    log_path: Path | None = None,
-    input_text: str | None = None,
-    cwd: Path = ROOT,
-) -> tuple[int, str]:
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, input=input_text)
-    output = result.stdout + result.stderr
-    if log_path:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text(output, encoding="utf-8")
-    return result.returncode, output
-
-
-def resolve_agent(agent: str) -> str:
-    if agent != "auto":
-        return agent
-    if shutil.which("codex"):
-        return "codex"
-    if shutil.which("claude"):
-        return "claude"
-    return "none"
-
-
-def check_agent(agent: str) -> bool:
-    if agent == "codex":
-        return shutil.which("codex") is not None
-    if agent == "claude":
-        return shutil.which("claude") is not None
-    return False
-
-
 def run_reviewer(agent: str, prompt: str, log_path: Path) -> tuple[int, str]:
     if agent == "codex":
-        return run(
-            [
-                "codex",
-                "--ask-for-approval",
-                "never",
-                "exec",
-                "--cd",
-                str(ROOT),
-                "--sandbox",
-                "read-only",
-                "--ephemeral",
-                "-",
-            ],
-            log_path,
-            input_text=prompt,
-        )
-
-    if agent == "claude":
-        with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
-            review_root = Path(tmp_dir) / ROOT.name
-            shutil.copytree(ROOT, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
-            return run(["claude", "-p", prompt], log_path, cwd=review_root)
+        return run_codex_agent(ROOT, prompt, log_path, read_only=True)
 
     return 1, f"Unsupported agent: {agent}"
-
-
-def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
-    if agent == "codex" and CODEX_SESSION_ACCESS_ERROR in output:
-        return True
-    return False
 
 
 def docs_prompt() -> str:
@@ -179,9 +108,9 @@ def main() -> int:
     parser.add_argument("task", nargs="?", help="Task directory under .workroom/phases for phases mode")
     parser.add_argument(
         "--agent",
-        choices=["auto", "codex", "claude"],
+        choices=["auto", "codex"],
         default="auto",
-        help="Reviewer agent to use. auto prefers Codex when available.",
+        help="Reviewer agent to use. auto selects Codex when available.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the reviewer prompt without calling an agent")
     args = parser.parse_args()
@@ -211,7 +140,7 @@ def main() -> int:
 
     agent = resolve_agent(args.agent)
     if not check_agent(agent):
-        print("ERROR: No supported reviewer CLI found. Install Codex or Claude, or use --dry-run.")
+        print("ERROR: No supported reviewer CLI found. Install Codex, or use --dry-run.")
         return 1
 
     log_path = WORKROOM_DIR / "reviews" / log_name
