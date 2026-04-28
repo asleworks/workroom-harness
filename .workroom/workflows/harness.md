@@ -66,6 +66,7 @@ Runner safeguards:
 
 - Agent output is streamed into the phase log while the process is running.
 - Prompt input is passed through a temporary stdin file instead of an in-memory pipe write.
+- Routine verification or review failures are treated as internal fix-loop feedback. The default CLI output stays concise and points to logs; use `--verbose` to print full failure output on each attempt.
 - `WORKROOM_PHASE_MAX_RETRIES` controls worker/fix attempts per phase. Default: `5`.
 - `WORKROOM_AGENT_TOTAL_TIMEOUT_SECONDS` controls the wall-clock runner timeout. Default: `7200`.
 - `WORKROOM_AGENT_IDLE_TIMEOUT_SECONDS` is disabled by default. Set it only when a project explicitly wants no-output watchdog behavior.

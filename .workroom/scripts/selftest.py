@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import contextlib
+import io
 import json
 import shutil
 import sys
@@ -15,6 +17,8 @@ from review_artifacts import decision_code, review_exit_code
 from run_phases import (
     fix_prompt,
     phase_prompt,
+    previous_failure_section,
+    report_retry_feedback,
     retryable_pause_exit_code,
     summarize_phase_failure,
     verification_feedback,
@@ -121,6 +125,31 @@ def test_phase_prompt_status_contract() -> None:
     assert 'repeated failure: `"status": "error"`' not in prompt
 
 
+def test_retry_output_is_concise_by_default() -> None:
+    stream = io.StringIO()
+    with contextlib.redirect_stdout(stream):
+        report_retry_feedback(
+            "Verification failed.",
+            "Full verification output:\napp/api/route.ts(1,1): error TS1234",
+            run_phases.ROOT / ".workroom/phases/example/phase-01.verify.log",
+            verbose=False,
+        )
+
+    output = stream.getvalue()
+    assert "Verification failed. Retrying with feedback." in output
+    assert "phase-01.verify.log" in output
+    assert "TS1234" not in output
+
+    previous = previous_failure_section(
+        {
+            "last_failure_reason": "app/api/route.ts(1,1): error TS1234",
+            "last_failure_log": ".workroom/phases/example/phase-01.verify.log",
+        }
+    )
+    assert "Last failure log" in previous
+    assert "phase-01.verify.log" in previous
+
+
 def main() -> int:
     tests = [
         test_review_contract,
@@ -128,6 +157,7 @@ def main() -> int:
         test_read_only_copy_ignore,
         test_harness_feedback_contract,
         test_phase_prompt_status_contract,
+        test_retry_output_is_concise_by_default,
     ]
     for test in tests:
         test()

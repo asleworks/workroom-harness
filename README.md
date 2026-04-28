@@ -91,3 +91,5 @@ fill docs
 Codex uses `codex exec`. Claude Code uses `claude -p`.
 
 If a phase cannot pass verification or review within the retry limit, the harness pauses on that phase and leaves it `pending` with `last_failure_reason`. It does not advance to the next phase, and it does not treat this retryable pause as a CLI error unless `--strict-exit-codes` is used.
+
+Routine compiler, lint, test, and review failures are fed back to the worker internally. By default the harness prints concise retry progress and log paths instead of dumping the full failure output on every attempt. Use `--verbose` when you need full per-attempt output in the terminal.

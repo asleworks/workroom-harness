@@ -185,6 +185,8 @@ def previous_failure_section(phase: dict) -> str:
         lines.append(f"- Last failed at: {phase['last_failed_at']}")
     if phase.get("last_failure_attempts"):
         lines.append(f"- Attempts in last run: {phase['last_failure_attempts']}")
+    if phase.get("last_failure_log"):
+        lines.append(f"- Last failure log: {phase['last_failure_log']}")
     if runner_error:
         lines.append(f"- Last runner error: {runner_error}")
     if phase.get("last_runner_log"):
@@ -331,6 +333,21 @@ def review_feedback(result: dict) -> str:
             lines.append(f"{title}:")
             lines.extend(f"- {item}" for item in items)
     return "\n".join(lines).strip()
+
+
+def log_ref(path: Path) -> str:
+    return str(path.relative_to(ROOT))
+
+
+def report_retry_feedback(message: str, feedback: str, log_path: Path | None, verbose: bool) -> None:
+    if verbose:
+        print(feedback)
+        return
+
+    if log_path:
+        print(f"{message} Retrying with feedback. Log: {log_ref(log_path)}")
+    else:
+        print(f"{message} Retrying with feedback.")
 
 
 def phase_prompt(
@@ -552,6 +569,11 @@ def main() -> int:
         action="store_true",
         help="Return exit code 1 when a retryable phase pauses after failed attempts. By default, retryable pauses exit 0.",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print full verification and review feedback on each failed attempt. By default, detailed failures are kept in logs and worker feedback.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print the first prompt without calling an agent")
     args = parser.parse_args()
 
@@ -634,6 +656,7 @@ def main() -> int:
 
         retries = int(phase.get("retries", 0))
         feedback = ""
+        feedback_log_path: Path | None = None
         while retries < MAX_RETRIES:
             print(f"Running {phase['id']}: {phase['title']} with {agent} (attempt {retries + 1}/{MAX_RETRIES})")
             log_path = task_dir / f"{phase['id']}.worker.{retries + 1}.log"
@@ -660,7 +683,8 @@ def main() -> int:
                     update_top_index(task_name, "error")
                     return 1
 
-                verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], task_dir / f"{phase['id']}.verify.log")
+                verify_log_path = task_dir / f"{phase['id']}.verify.log"
+                verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], verify_log_path)
                 if verify_code == 0:
                     review_log_path = task_dir / f"{phase['id']}.review.{retries + 1}.log"
                     set_phase_status(
@@ -688,7 +712,8 @@ def main() -> int:
                         if is_agent_infrastructure_failure(agent, review_output):
                             return abort_agent_infrastructure_failure(agent, review_output, review_log_path, index_path, phase["id"])
                         feedback = "Review agent failed to run.\n\n" + review_output
-                        print(feedback)
+                        feedback_log_path = review_log_path
+                        report_retry_feedback("Review agent failed.", feedback, feedback_log_path, args.verbose)
                     else:
                         review_result = parse_review_result(review_output)
                         if review_result is None:
@@ -714,6 +739,7 @@ def main() -> int:
                                         "last_runner_failed_at",
                                         "last_runner_error",
                                         "last_runner_log",
+                                        "last_failure_log",
                                     ]:
                                         item.pop(key, None)
                                     previous_summaries.append(f"{phase['id']}: {item['summary']}")
@@ -722,14 +748,18 @@ def main() -> int:
                             break
 
                         feedback = review_feedback(review_result)
-                        print(feedback)
+                        feedback_log_path = review_log_path
+                        report_retry_feedback("Review requested changes.", feedback, feedback_log_path, args.verbose)
                 else:
                     feedback = verification_feedback(verify_output)
-                    print(verify_output)
+                    feedback_log_path = verify_log_path
+                    report_retry_feedback("Verification failed.", feedback, feedback_log_path, args.verbose)
             else:
                 if is_agent_infrastructure_failure(agent, worker_output):
                     return abort_agent_infrastructure_failure(agent, worker_output, log_path, index_path, phase["id"])
                 feedback = "Worker agent failed.\n\n" + worker_output
+                feedback_log_path = log_path
+                report_retry_feedback("Worker agent failed.", feedback, feedback_log_path, args.verbose)
 
             index = read_json(index_path)
             current = next(item for item in index["phases"] if item["id"] == phase["id"])
@@ -745,6 +775,8 @@ def main() -> int:
             current["status"] = "retrying"
             current["last_failed_at"] = stamp()
             current["last_failure_reason"] = summarize_phase_failure(feedback)
+            if feedback_log_path:
+                current["last_failure_log"] = log_ref(feedback_log_path)
             write_json(index_path, index)
 
         index = read_json(index_path)
@@ -755,9 +787,15 @@ def main() -> int:
             current["last_failed_at"] = stamp()
             current["last_failure_reason"] = summarize_phase_failure(feedback)
             current["last_failure_attempts"] = MAX_RETRIES
+            if feedback_log_path:
+                current["last_failure_log"] = log_ref(feedback_log_path)
             write_json(index_path, index)
             update_top_index(task_name, "running")
             print(f"Phase {phase['id']} did not receive verification and review approval after {MAX_RETRIES} attempts.")
+            if current.get("last_failure_reason"):
+                print(f"Last failure: {current['last_failure_reason']}")
+            if current.get("last_failure_log"):
+                print(f"Last failure log: {current['last_failure_log']}")
             print("The phase has been left pending so the harness can be rerun after fixes or prompt updates.")
             return retryable_pause_exit_code(args.strict_exit_codes)
 
