@@ -59,7 +59,7 @@ Describe the outcome this phase must produce.
 ## Verification
 
 ```bash
-.workroom/scripts/verify.sh
+bash .workroom/scripts/verify.sh
 ```
 
 ## Status Update

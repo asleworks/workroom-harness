@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
 import json
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
@@ -60,11 +59,11 @@ def check_json_files() -> bool:
 
 def check_verify() -> bool:
     verify = WORKROOM_DIR / "scripts/verify.sh"
-    executable = os.access(verify, os.X_OK)
-    print(f"{'OK' if executable else 'WARN'}  .workroom/scripts/verify.sh executable")
+    readable = verify.is_file()
+    print(f"{'OK' if readable else 'MISS'}  .workroom/scripts/verify.sh present")
 
     result = subprocess.run(
-        [str(verify)],
+        ["bash", str(verify)],
         cwd=ROOT,
         text=True,
         capture_output=True,

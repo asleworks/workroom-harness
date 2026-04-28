@@ -14,6 +14,7 @@ from agent_runner import ignore_read_only_copy_items, normalize_structured_outpu
 from review_artifacts import decision_code, review_exit_code
 from run_phases import (
     fix_prompt,
+    phase_prompt,
     retryable_pause_exit_code,
     summarize_phase_failure,
     verification_feedback,
@@ -101,6 +102,23 @@ def test_harness_feedback_contract() -> None:
     assert "Current Repository Change Snapshot" in prompt
     assert "Fix Requirements" in prompt
     assert "handler.ts" in prompt
+    assert "Do not mark repeated verification or review failure as" in prompt
+    assert 'unrecoverable repeated failure: `"status": "error"`' not in prompt
+
+
+def test_phase_prompt_status_contract() -> None:
+    prompt = phase_prompt(
+        run_phases.ROOT / ".workroom/phases/example/context.md",
+        "example",
+        run_phases.ROOT / ".workroom/templates/phase.template.md",
+        [],
+        "",
+    )
+
+    assert 'user action needed: `"status": "blocked"`' in prompt
+    assert 'truly unrecoverable implementation problem: `"status": "error"`' in prompt
+    assert "Do not mark repeated verification or review failure as" in prompt
+    assert 'repeated failure: `"status": "error"`' not in prompt
 
 
 def main() -> int:
@@ -109,6 +127,7 @@ def main() -> int:
         test_claude_envelope_normalization,
         test_read_only_copy_ignore,
         test_harness_feedback_contract,
+        test_phase_prompt_status_contract,
     ]
     for test in tests:
         test()

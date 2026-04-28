@@ -75,11 +75,16 @@ def run(
     input_text: str | None = None,
     cwd: Path = ROOT,
 ) -> tuple[int, str]:
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, input=input_text)
-    output = result.stdout + result.stderr
+    try:
+        result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, input=input_text)
+        output = result.stdout + result.stderr
+        code = result.returncode
+    except OSError as error:
+        output = f"ERROR: failed to run {' '.join(command)}: {error}\n"
+        code = 127
     if log_path:
         log_path.write_text(output, encoding="utf-8")
-    return result.returncode, output
+    return code, output
 
 
 def run_agent(
@@ -367,8 +372,10 @@ Complete only the phase below.
 
 After implementation, update `.workroom/phases/{task_name}/index.json` for this phase only if blocked or unrecoverable:
 
-- repeated failure: `"status": "error"` and `"error_message"`
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
+- truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
+
+Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -434,7 +441,9 @@ Make the smallest reasonable change that resolves the feedback. Do not expand sc
 After fixing, update `.workroom/phases/{task_name}/index.json` for this phase only if the feedback requires a status change:
 
 - user action needed: `"status": "blocked"` and `"blocked_reason"`
-- unrecoverable repeated failure: `"status": "error"` and `"error_message"`
+- truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
+
+Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
 
 Do not write `"status": "completed"`, `"completed_at"`, or `"summary"` for this phase. The harness writes those fields only after verification and review approval, using the `PHASE_SUMMARY` line from your final response.
 
@@ -651,7 +660,7 @@ def main() -> int:
                     update_top_index(task_name, "error")
                     return 1
 
-                verify_code, verify_output = run([str(WORKROOM_DIR / "scripts/verify.sh")], task_dir / f"{phase['id']}.verify.log")
+                verify_code, verify_output = run(["bash", str(WORKROOM_DIR / "scripts/verify.sh")], task_dir / f"{phase['id']}.verify.log")
                 if verify_code == 0:
                     review_log_path = task_dir / f"{phase['id']}.review.{retries + 1}.log"
                     set_phase_status(

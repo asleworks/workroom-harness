@@ -32,7 +32,7 @@ Describe the outcome this phase must produce.
 ## Verification
 
 ```bash
-.workroom/scripts/verify.sh
+bash .workroom/scripts/verify.sh
 ```
 
 ## Status Update
@@ -41,5 +41,7 @@ Do not mark this phase as completed manually. Do not write `completed_at` or `su
 
 If the phase cannot continue, update `index.json` with either:
 
-- `"status": "blocked"` and `"blocked_reason"`
-- `"status": "error"` and `"error_message"`
+- user action needed: `"status": "blocked"` and `"blocked_reason"`
+- truly unrecoverable implementation problem: `"status": "error"` and `"error_message"`
+
+Do not mark repeated verification or review failure as `"error"`. The harness owns retry counting and will leave the phase pending with `last_failure_reason` when attempts are exhausted.
