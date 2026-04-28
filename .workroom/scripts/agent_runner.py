@@ -15,7 +15,7 @@ from pathlib import Path
 CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
 AGENT_IDLE_TIMEOUT_ERROR = "agent runner produced no output"
 AGENT_TOTAL_TIMEOUT_ERROR = "agent runner exceeded total timeout"
-READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
+READ_ONLY_COPY_IGNORE_NAMES = {
     ".DS_Store",
     ".git",
     ".pytest_cache",
@@ -25,9 +25,11 @@ READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
     "coverage",
     "dist",
     "node_modules",
-    "*.log",
-    "*.log.final",
-)
+}
+READ_ONLY_COPY_IGNORE_SUFFIXES = {
+    ".log",
+    ".log.final",
+}
 
 
 def int_env(name: str, default: int) -> int:
@@ -74,6 +76,18 @@ def check_agent(agent: str) -> bool:
     if agent == "claude":
         return shutil.which("claude") is not None
     return False
+
+
+def ignore_read_only_copy_items(directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    base = Path(directory)
+    for name in names:
+        path = base / name
+        if name in READ_ONLY_COPY_IGNORE_NAMES or any(name.endswith(suffix) for suffix in READ_ONLY_COPY_IGNORE_SUFFIXES):
+            ignored.add(name)
+        elif path.is_symlink():
+            ignored.add(name)
+    return ignored
 
 
 def parse_review_result(output: str) -> dict | None:
@@ -287,7 +301,7 @@ def run_claude_agent(
     if read_only:
         with tempfile.TemporaryDirectory(prefix="workroom-review-") as tmp_dir:
             review_root = Path(tmp_dir) / root.name
-            shutil.copytree(root, review_root, ignore=READ_ONLY_COPY_IGNORE, symlinks=True)
+            shutil.copytree(root, review_root, ignore=ignore_read_only_copy_items, symlinks=False)
             code, output = run_streaming(command, log_path, input_text=prompt, cwd=review_root)
     else:
         code, output = run_streaming(command, log_path, input_text=prompt, cwd=root)

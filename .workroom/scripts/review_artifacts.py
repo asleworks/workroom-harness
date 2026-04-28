@@ -150,17 +150,20 @@ def main() -> int:
     if code != 0:
         print(output)
         if is_agent_infrastructure_failure(agent, output):
-            print(f"\nReviewer runner failed before review could run. Fix the runner permission issue and rerun. Log: {log_path.relative_to(ROOT)}")
+            print(
+                f"\nReviewer runner failed before review could run. Fix the runner permission issue and rerun. Log: {log_path.relative_to(ROOT)}",
+                file=sys.stderr,
+            )
             return 1
-        print(f"\nReview agent failed. Log: {log_path.relative_to(ROOT)}")
+        print(f"\nReview agent failed. Log: {log_path.relative_to(ROOT)}", file=sys.stderr)
         return 1
 
     print(output)
-    print(f"\nReview log: {log_path.relative_to(ROOT)}")
+    print(f"Review log: {log_path.relative_to(ROOT)}", file=sys.stderr)
     decision = decision_code(output)
     exit_code = review_exit_code(decision, args.strict_exit_codes)
     if exit_code == 1:
-        print('\nERROR: Review output must contain a valid structured JSON decision.')
+        print('ERROR: Review output must contain a valid structured JSON decision.', file=sys.stderr)
     return exit_code
 
 
