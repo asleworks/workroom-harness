@@ -16,6 +16,17 @@ SKILL_DIRS = {
 }
 
 GITIGNORE_MARKER = "# workroom-harness"
+PROJECT_STATE_PATHS = (
+    "AGENTS.md",
+    "docs/",
+    "phases/",
+    "scripts/verify.sh",
+)
+
+
+def is_project_state(rel_path: Path) -> bool:
+    rel = rel_path.as_posix()
+    return any(rel == item.rstrip("/") or rel.startswith(item) for item in PROJECT_STATE_PATHS)
 
 
 def copy_file(src: Path, dst: Path, overwrite: bool, dry_run: bool) -> str:
@@ -53,19 +64,23 @@ def copy_tree_files(
         ):
             continue
         dst = dst_dir / rel
-        action = copy_file(src, dst, overwrite, dry_run)
+        effective_overwrite = overwrite and not is_project_state(rel)
+        action = copy_file(src, dst, effective_overwrite, dry_run)
         results.append((action, dst))
     return results
 
 
 def install_gitignore(target: Path, dry_run: bool) -> list[tuple[str, Path]]:
     path = target / ".gitignore"
+    ignore_lines = [
+        ".workroom/phases/**/*.log",
+        ".workroom/phases/**/context.md",
+        ".workroom/reviews/*.log",
+    ]
     section = f"""
 
 {GITIGNORE_MARKER}
-.workroom/phases/**/*.log
-.workroom/phases/**/context.md
-.workroom/reviews/*.log
+{chr(10).join(ignore_lines)}
 """
 
     if not path.exists():
@@ -75,7 +90,12 @@ def install_gitignore(target: Path, dry_run: bool) -> list[tuple[str, Path]]:
 
     text = path.read_text(encoding="utf-8")
     if GITIGNORE_MARKER in text:
-        return [("skip", path)]
+        missing = [line for line in ignore_lines if line not in text]
+        if not missing:
+            return [("skip", path)]
+        if not dry_run:
+            path.write_text(text.rstrip() + "\n" + "\n".join(missing) + "\n", encoding="utf-8")
+        return [("append", path)]
 
     if not dry_run:
         path.write_text(text.rstrip() + section + "\n", encoding="utf-8")
@@ -93,7 +113,11 @@ def main() -> int:
         default="codex",
         help="Which agent skill directories to install",
     )
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing harness files")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite harness-owned files while preserving project docs, phases, AGENTS.md, and verify.sh",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show what would be installed")
     args = parser.parse_args()
 

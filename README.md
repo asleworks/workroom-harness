@@ -39,6 +39,14 @@ python3 .workroom/scripts/doctor.py
 
 On a fresh install, `doctor.py` may report that the harness is installed while project docs still need planning. That is expected before running `$workroom-plan`.
 
+To update an existing install, rerun the installer with `--overwrite`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash -s -- --overwrite
+```
+
+`--overwrite` updates harness-owned scripts, workflows, templates, and skills. It preserves project state files: `.workroom/AGENTS.md`, `.workroom/docs/`, `.workroom/phases/`, and `.workroom/scripts/verify.sh`.
+
 ## Workflow
 
 Codex:

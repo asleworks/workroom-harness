@@ -45,6 +45,14 @@ python3 .workroom/scripts/doctor.py
 
 처음 설치한 직후에는 `doctor.py`가 하네스는 설치됐지만 프로젝트 문서는 아직 준비되지 않았다고 경고할 수 있습니다. `$workroom-plan`을 실행하기 전이라면 정상입니다.
 
+기존 설치를 업데이트할 때는 `--overwrite`를 붙여 다시 실행합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/asleworks/workroom-harness/main/.workroom/scripts/install-codex.sh | bash -s -- --overwrite
+```
+
+`--overwrite`는 하네스 소유의 scripts, workflows, templates, skills를 갱신합니다. 프로젝트 상태 파일인 `.workroom/AGENTS.md`, `.workroom/docs/`, `.workroom/phases/`, `.workroom/scripts/verify.sh`는 보존합니다.
+
 ## 사용법
 
 사용자가 알면 되는 명령은 세 개입니다.
