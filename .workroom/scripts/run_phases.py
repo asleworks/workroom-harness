@@ -2,10 +2,12 @@
 
 import argparse
 import json
+import select
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -17,9 +19,13 @@ from validate_phases import validate_task, validate_top_index
 WORKROOM_DIR = Path(__file__).resolve().parent.parent
 ROOT = WORKROOM_DIR.parent
 MAX_RETRIES = 3
+AGENT_IDLE_TIMEOUT_SECONDS = 900
+AGENT_TOTAL_TIMEOUT_SECONDS = 3600
 APPROVED = "REVIEW_DECISION: APPROVED"
 CHANGES_REQUESTED = "REVIEW_DECISION: CHANGES_REQUESTED"
 CODEX_SESSION_ACCESS_ERROR = "Codex cannot access session files"
+AGENT_IDLE_TIMEOUT_ERROR = "agent runner produced no output"
+AGENT_TOTAL_TIMEOUT_ERROR = "agent runner exceeded total timeout"
 READ_ONLY_COPY_IGNORE = shutil.ignore_patterns(
     ".DS_Store",
     ".pytest_cache",
@@ -81,6 +87,79 @@ def run(
     return result.returncode, output
 
 
+def run_streaming(
+    command: list[str],
+    log_path: Path,
+    input_text: str | None = None,
+    cwd: Path = ROOT,
+    idle_timeout_seconds: int = AGENT_IDLE_TIMEOUT_SECONDS,
+    total_timeout_seconds: int = AGENT_TOTAL_TIMEOUT_SECONDS,
+) -> tuple[int, str]:
+    started_at = time.monotonic()
+    last_output_at = started_at
+    output_parts: list[str] = []
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with log_path.open("w", encoding="utf-8") as log:
+        log.write(f"$ {' '.join(command)}\n")
+        log.write(f"started_at: {stamp()}\n\n")
+        log.flush()
+
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        if input_text is not None and process.stdin is not None:
+            process.stdin.write(input_text)
+            process.stdin.close()
+
+        assert process.stdout is not None
+        while True:
+            now = time.monotonic()
+            if process.poll() is not None:
+                remainder = process.stdout.read()
+                if remainder:
+                    output_parts.append(remainder)
+                    log.write(remainder)
+                    log.flush()
+                break
+
+            if now - started_at > total_timeout_seconds:
+                message = f"\nERROR: agent runner exceeded total timeout of {total_timeout_seconds} seconds.\n"
+                output_parts.append(message)
+                log.write(message)
+                log.flush()
+                process.kill()
+                return 124, "".join(output_parts)
+
+            if now - last_output_at > idle_timeout_seconds:
+                message = f"\nERROR: agent runner produced no output for {idle_timeout_seconds} seconds.\n"
+                output_parts.append(message)
+                log.write(message)
+                log.flush()
+                process.kill()
+                return 124, "".join(output_parts)
+
+            readable, _, _ = select.select([process.stdout], [], [], 1)
+            if not readable:
+                continue
+
+            line = process.stdout.readline()
+            if not line:
+                continue
+            last_output_at = time.monotonic()
+            output_parts.append(line)
+            log.write(line)
+            log.flush()
+
+        return process.returncode or 0, "".join(output_parts)
+
+
 def resolve_agent(agent: str) -> str:
     if agent != "auto":
         return agent
@@ -101,7 +180,7 @@ def check_agent(agent: str) -> bool:
 
 def run_agent(agent: str, prompt: str, log_path: Path, read_only: bool = False) -> tuple[int, str]:
     if agent == "codex":
-        return run(
+        return run_streaming(
             [
                 "codex",
                 "--ask-for-approval",
@@ -133,6 +212,8 @@ def run_agent(agent: str, prompt: str, log_path: Path, read_only: bool = False) 
 def is_agent_infrastructure_failure(agent: str, output: str) -> bool:
     if agent == "codex" and CODEX_SESSION_ACCESS_ERROR in output:
         return True
+    if AGENT_IDLE_TIMEOUT_ERROR in output or AGENT_TOTAL_TIMEOUT_ERROR in output:
+        return True
     return False
 
 
@@ -144,6 +225,17 @@ def abort_agent_infrastructure_failure(agent: str, output: str, log_path: Path) 
         print()
         print(output.strip())
     return 1
+
+
+def set_phase_status(index_path: Path, phase_id: str, status: str, **fields: str | int) -> None:
+    index = read_json(index_path)
+    for item in index.get("phases", []):
+        if item.get("id") == phase_id:
+            item["status"] = status
+            item[f"{status}_at"] = stamp()
+            item.update(fields)
+            break
+    write_json(index_path, index)
 
 
 def update_top_index(task_name: str, status: str) -> None:
@@ -466,6 +558,13 @@ def main() -> int:
         while retries < MAX_RETRIES:
             print(f"Running {phase['id']}: {phase['title']} with {agent} (attempt {retries + 1}/{MAX_RETRIES})")
             log_path = task_dir / f"{phase['id']}.worker.{retries + 1}.log"
+            set_phase_status(
+                index_path,
+                phase["id"],
+                "running",
+                attempt=retries + 1,
+                log=str(log_path.relative_to(ROOT)),
+            )
             active_prompt = (
                 fix_prompt(context_path, task_name, phase_file, previous_summaries, feedback)
                 if feedback
@@ -485,6 +584,13 @@ def main() -> int:
                 verify_code, verify_output = run([str(WORKROOM_DIR / "scripts/verify.sh")], task_dir / f"{phase['id']}.verify.log")
                 if verify_code == 0:
                     review_log_path = task_dir / f"{phase['id']}.review.{retries + 1}.log"
+                    set_phase_status(
+                        index_path,
+                        phase["id"],
+                        "reviewing",
+                        attempt=retries + 1,
+                        log=str(review_log_path.relative_to(ROOT)),
+                    )
                     review_code, review_output = run_agent(
                         agent,
                         review_prompt(context_path, task_name, phase_file, verify_output, previous_summaries),
